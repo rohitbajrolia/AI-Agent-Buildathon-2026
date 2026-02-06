@@ -1,0 +1,13 @@
+[project]
+name = "home-insurance-mcp-client"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=1.0.7",
+    "mcp[cli]>=1.26.0",
+    "openai>=2.16.0",
+    "python-dotenv>=1.2.1",
+    "streamlit>=1.53.1",
+]

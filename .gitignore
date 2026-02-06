@@ -1,0 +1,41 @@
+# --- Workspace-wide ignores (applies when you init git at repo root) ---
+
+# Local documents / policy packets (keep out of git)
+docs/
+
+# Python virtual environments
+.venv/
+
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+.hypothesis/
+
+# Local runtime markers
+.qdrant_indexed
+
+# Packaging / build artifacts
+build/
+dist/
+wheels/
+*.egg-info/
+
+# Local environment files (secrets)
+.env
+.env.*
+!.env.example
+
+# VS Code local settings (optional; remove if you want to commit workspace settings)
+.vscode/
+
+# OS / tooling noise
+.DS_Store
+Thumbs.db
+*.log
