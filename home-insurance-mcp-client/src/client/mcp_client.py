@@ -94,6 +94,31 @@ async def ingest_folder(
         return json.loads(text_payload)
 
 
+async def start_ingest_job(
+    folder_path: str,
+    max_pages: int = 25,
+    chunk_size: int = 1200,
+    overlap: int = 150,
+) -> dict:
+    """Starts an ingest job and returns {job_id}.
+
+    This lets the UI show real progress while long-running ingest runs.
+    """
+    async with mcp_session() as session:
+        args = {
+            "folder_path": folder_path,
+            "max_pages": max_pages,
+            "chunk_size": chunk_size,
+            "overlap": overlap,
+        }
+        result = await session.call_tool("start_ingest_job", args)
+        text_payload = _extract_text_payload(result)
+        if not text_payload:
+            return {}
+        import json
+        return json.loads(text_payload)
+
+
 async def index_folder_qdrant(
     folder_path: str,
     max_pages: int = 25,
@@ -109,6 +134,44 @@ async def index_folder_qdrant(
             "overlap": overlap,
         }
         result = await session.call_tool("index_folder_qdrant", args)
+        text_payload = _extract_text_payload(result)
+        if not text_payload:
+            return {}
+        import json
+        return json.loads(text_payload)
+
+
+async def start_index_job(
+    folder_path: str,
+    max_pages: int = 25,
+    chunk_size: int = 1200,
+    overlap: int = 150,
+    batch_size: int = 64,
+) -> dict:
+    """Starts an index job and returns {job_id}.
+
+    Server performs embedding + Qdrant upserts in batches and exposes progress.
+    """
+    async with mcp_session() as session:
+        args = {
+            "folder_path": folder_path,
+            "max_pages": max_pages,
+            "chunk_size": chunk_size,
+            "overlap": overlap,
+            "batch_size": batch_size,
+        }
+        result = await session.call_tool("start_index_job", args)
+        text_payload = _extract_text_payload(result)
+        if not text_payload:
+            return {}
+        import json
+        return json.loads(text_payload)
+
+
+async def job_status(job_id: str) -> dict:
+    """Polls job status for ingest/index jobs."""
+    async with mcp_session() as session:
+        result = await session.call_tool("job_status", {"job_id": job_id})
         text_payload = _extract_text_payload(result)
         if not text_payload:
             return {}
