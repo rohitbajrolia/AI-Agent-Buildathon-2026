@@ -312,8 +312,9 @@ with st.sidebar:
         try:
             payload = _run(mcp_client.health())
             st.session_state["last_health"] = payload
-            st.success("Server is reachable")
-            st.json(payload)
+            st.success("Server is up and running")
+            with st.expander("Health details (optional)", expanded=False):
+                st.json(payload)
         except Exception as e:
             st.error(f"Health check failed: {e}")
 
