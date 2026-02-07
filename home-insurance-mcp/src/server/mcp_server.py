@@ -6,6 +6,9 @@ import json
 import contextlib
 import uuid
 import re
+import asyncio
+import threading
+import math
 from typing import AsyncIterator
 
 from dotenv import load_dotenv, dotenv_values
@@ -49,6 +52,266 @@ if not OPENAI_API_KEY:
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY, timeout=30.0, max_retries=1)
 qdrant = QdrantClient(url=QDRANT_URL, check_compatibility=False)
+
+
+# -----------------------------
+# Simple in-memory job tracker
+# (start job → poll status)
+# -----------------------------
+
+_JOBS: dict[str, dict] = {}
+_JOBS_LOCK = threading.Lock()
+
+
+def _job_create(*, kind: str, params: dict) -> str:
+    job_id = str(uuid.uuid4())
+    record = {
+        "job_id": job_id,
+        "kind": kind,
+        "status": "queued",
+        "message": "queued",
+        "params": params,
+        "created_unix": int(time.time()),
+        "started_unix": None,
+        "finished_unix": None,
+        "progress": {},
+        "result": None,
+        "error": None,
+    }
+    with _JOBS_LOCK:
+        _JOBS[job_id] = record
+    return job_id
+
+
+def _job_update(job_id: str, **fields) -> None:
+    with _JOBS_LOCK:
+        rec = _JOBS.get(job_id)
+        if not rec:
+            return
+        for k, v in fields.items():
+            if k == "progress" and isinstance(v, dict):
+                rec["progress"].update(v)
+            else:
+                rec[k] = v
+
+
+def _job_get(job_id: str) -> dict | None:
+    with _JOBS_LOCK:
+        rec = _JOBS.get(job_id)
+        return dict(rec) if rec else None
+
+
+def _list_supported_files(folder_path: Path) -> list[Path]:
+    supported_ext = {".pdf", ".png", ".jpg", ".jpeg"}
+    return [p for p in folder_path.rglob("*") if p.is_file() and p.suffix.lower() in supported_ext]
+
+
+def _estimate_total_chunks(*, files: list[Path], folder_path: Path, max_pages: int, chunk_size: int, overlap: int) -> int:
+    total = 0
+    for p in files:
+        try:
+            ext = p.suffix.lower()
+            if ext == ".pdf":
+                pages = read_pdf_pages(p, max_pages=max_pages)
+                for page_text in pages:
+                    total += len(chunk_text(page_text, chunk_size=chunk_size, overlap=overlap))
+            else:
+                text = read_image_text(p)
+                total += len(chunk_text(text, chunk_size=chunk_size, overlap=overlap))
+        except Exception:
+            continue
+    return total
+
+
+def _run_ingest_job(*, job_id: str, folder_path: Path, max_pages: int, chunk_size: int, overlap: int) -> None:
+    _job_update(job_id, status="running", message="ingesting", started_unix=int(time.time()))
+
+    files = _list_supported_files(folder_path)
+    summaries = []
+    errors = []
+    chunks_total = 0
+
+    _job_update(job_id, progress={"files_total": len(files), "files_done": 0})
+
+    for i, p in enumerate(files, start=1):
+        try:
+            ext = p.suffix.lower()
+            if ext == ".pdf":
+                text = read_pdf_text(p, max_pages=max_pages)
+            else:
+                text = read_image_text(p)
+
+            doc_type = classify_doc(text)
+            chunks = chunk_text(text, chunk_size=chunk_size, overlap=overlap)
+            chunks_total += len(chunks)
+
+            rel = str(p.relative_to(folder_path)).replace("\\", "/")
+            summaries.append(
+                {
+                    "file_name": rel,
+                    "doc_type": doc_type,
+                    "text_chars": len(text),
+                    "chunks_count": len(chunks),
+                }
+            )
+        except Exception as e:
+            errors.append(
+                {
+                    "file_name": str(p.relative_to(folder_path)).replace("\\", "/"),
+                    "error": _redact_error_text(e),
+                }
+            )
+
+        _job_update(
+            job_id,
+            message=f"ingesting ({i}/{len(files)})",
+            progress={"files_done": i, "chunks_total": chunks_total},
+        )
+
+    payload = {
+        "folder_path": str(folder_path),
+        "docs_root": str(DOCS_ROOT),
+        "files_total": len(files),
+        "summaries": summaries,
+        "errors": errors,
+        "chunks_total": chunks_total,
+    }
+
+    _job_update(job_id, status="completed", message="done", result=payload, finished_unix=int(time.time()))
+
+
+def _run_index_job(*, job_id: str, folder_path: Path, max_pages: int, chunk_size: int, overlap: int, batch_size: int) -> None:
+    _job_update(job_id, status="running", message="estimating chunks", started_unix=int(time.time()))
+
+    files = _list_supported_files(folder_path)
+    _job_update(job_id, progress={"files_total": len(files), "files_done": 0})
+
+    total_chunks_est = _estimate_total_chunks(
+        files=files,
+        folder_path=folder_path,
+        max_pages=max_pages,
+        chunk_size=chunk_size,
+        overlap=overlap,
+    )
+    batches_total = int(math.ceil(total_chunks_est / batch_size)) if total_chunks_est > 0 else 0
+
+    _job_update(
+        job_id,
+        message="indexing",
+        progress={
+            "chunks_total_est": total_chunks_est,
+            "batch_size": batch_size,
+            "batches_total": batches_total,
+            "batches_done": 0,
+            "points_upserted": 0,
+        },
+    )
+
+    points_buffer: list[PointStruct] = []
+    total_chunks_indexed = 0
+    errors = []
+    files_ok = 0
+    batches_done = 0
+
+    def _flush() -> None:
+        nonlocal batches_done, total_chunks_indexed
+        if not points_buffer:
+            return
+        qdrant.upsert(collection_name=QDRANT_COLLECTION, points=list(points_buffer))
+        total_chunks_indexed += len(points_buffer)
+        batches_done += 1
+        points_buffer.clear()
+        _job_update(
+            job_id,
+            message=f"upserting batches ({batches_done}/{batches_total or '?'})",
+            progress={"batches_done": batches_done, "points_upserted": total_chunks_indexed},
+        )
+
+    for file_i, p in enumerate(files, start=1):
+        try:
+            ext = p.suffix.lower()
+            rel = str(p.relative_to(folder_path)).replace("\\", "/")
+
+            if ext == ".pdf":
+                pages = read_pdf_pages(p, max_pages=max_pages)
+                full_text = "\n".join(pages)
+                doc_type = classify_doc(full_text)
+
+                running_chunk_index = 0
+                for page_i, page_text in enumerate(pages, start=1):
+                    page_chunks = chunk_text(page_text, chunk_size=chunk_size, overlap=overlap)
+                    vectors = embed_texts(page_chunks)
+
+                    if vectors:
+                        ensure_collection(QDRANT_COLLECTION, vector_size=len(vectors[0]))
+
+                    for chunk_in_page, (chunk, vec) in enumerate(zip(page_chunks, vectors)):
+                        stable = f"{rel}::p{page_i}::c{chunk_in_page}"
+                        point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable))
+                        payload = {
+                            "file_name": rel,
+                            "doc_type": doc_type,
+                            "page_number": page_i,
+                            "chunk_index": running_chunk_index,
+                            "text": chunk,
+                        }
+                        points_buffer.append(PointStruct(id=point_id, vector=vec, payload=payload))
+                        running_chunk_index += 1
+
+                        if len(points_buffer) >= batch_size:
+                            _flush()
+
+            else:
+                text = read_image_text(p)
+                doc_type = classify_doc(text)
+                chunks = chunk_text(text, chunk_size=chunk_size, overlap=overlap)
+                vectors = embed_texts(chunks)
+
+                if vectors:
+                    ensure_collection(QDRANT_COLLECTION, vector_size=len(vectors[0]))
+
+                for i, (chunk, vec) in enumerate(zip(chunks, vectors)):
+                    stable = f"{rel}::{i}"
+                    point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable))
+                    payload = {
+                        "file_name": rel,
+                        "doc_type": doc_type,
+                        "chunk_index": i,
+                        "text": chunk,
+                    }
+                    points_buffer.append(PointStruct(id=point_id, vector=vec, payload=payload))
+                    if len(points_buffer) >= batch_size:
+                        _flush()
+
+            files_ok += 1
+        except Exception as e:
+            errors.append({"file_name": str(p.relative_to(folder_path)).replace("\\", "/"), "error": _redact_error_text(e)})
+
+        _job_update(job_id, message=f"indexing files ({file_i}/{len(files)})", progress={"files_done": file_i})
+
+    # Final flush
+    try:
+        _flush()
+    except Exception as e:
+        errors.append({"file_name": "(flush)", "error": _redact_error_text(e)})
+
+    payload = {
+        "collection": QDRANT_COLLECTION,
+        "docs_root": str(DOCS_ROOT),
+        "files_indexed": files_ok,
+        "files_total": len(files),
+        "chunks_indexed": total_chunks_indexed,
+        "errors": errors,
+        "progress": {
+            "chunks_total_est": total_chunks_est,
+            "batch_size": batch_size,
+            "batches_total": batches_total,
+            "batches_done": batches_done,
+            "points_upserted": total_chunks_indexed,
+        },
+    }
+
+    _job_update(job_id, status="completed", message="done", result=payload, finished_unix=int(time.time()))
 
 
 _OPENAI_STATUS_CACHE_TS: float = 0.0
@@ -332,6 +595,82 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             "raw_hint": raw[:500],
         }
         return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
+
+    if name == "start_ingest_job":
+        folder_path = _resolve_docs_folder(arguments["folder_path"])
+        max_pages = int(arguments.get("max_pages", 25))
+        chunk_size = int(arguments.get("chunk_size", 1200))
+        overlap = int(arguments.get("overlap", 150))
+
+        job_id = _job_create(
+            kind="ingest",
+            params={
+                "folder_path": str(folder_path),
+                "max_pages": max_pages,
+                "chunk_size": chunk_size,
+                "overlap": overlap,
+            },
+        )
+
+        async def _runner():
+            try:
+                await asyncio.to_thread(
+                    _run_ingest_job,
+                    job_id=job_id,
+                    folder_path=folder_path,
+                    max_pages=max_pages,
+                    chunk_size=chunk_size,
+                    overlap=overlap,
+                )
+            except Exception as e:
+                _job_update(job_id, status="failed", message="failed", error=_redact_error_text(e), finished_unix=int(time.time()))
+
+        asyncio.create_task(_runner())
+        return [types.TextContent(type="text", text=json.dumps({"job_id": job_id}, indent=2))]
+
+    if name == "start_index_job":
+        folder_path = _resolve_docs_folder(arguments["folder_path"])
+        max_pages = int(arguments.get("max_pages", 25))
+        chunk_size = int(arguments.get("chunk_size", 1200))
+        overlap = int(arguments.get("overlap", 150))
+        batch_size = int(arguments.get("batch_size", 64))
+
+        job_id = _job_create(
+            kind="index",
+            params={
+                "folder_path": str(folder_path),
+                "max_pages": max_pages,
+                "chunk_size": chunk_size,
+                "overlap": overlap,
+                "batch_size": batch_size,
+            },
+        )
+
+        async def _runner():
+            try:
+                await asyncio.to_thread(
+                    _run_index_job,
+                    job_id=job_id,
+                    folder_path=folder_path,
+                    max_pages=max_pages,
+                    chunk_size=chunk_size,
+                    overlap=overlap,
+                    batch_size=batch_size,
+                )
+            except Exception as e:
+                _job_update(job_id, status="failed", message="failed", error=_redact_error_text(e), finished_unix=int(time.time()))
+
+        asyncio.create_task(_runner())
+        return [types.TextContent(type="text", text=json.dumps({"job_id": job_id}, indent=2))]
+
+    if name == "job_status":
+        job_id = (arguments.get("job_id") or "").strip()
+        if not job_id:
+            return [types.TextContent(type="text", text=json.dumps({"status": "error", "error": "job_id is required"}, indent=2))]
+        rec = _job_get(job_id)
+        if not rec:
+            return [types.TextContent(type="text", text=json.dumps({"status": "error", "error": "job not found", "job_id": job_id}, indent=2))]
+        return [types.TextContent(type="text", text=json.dumps(rec, indent=2))]
     
     if name == "ingest_folder":
         folder_path = _resolve_docs_folder(arguments["folder_path"])

@@ -3,6 +3,8 @@ import asyncio
 import json
 from pathlib import Path
 import re
+import hashlib
+import time
 
 # When Streamlit runs a file directly, relative imports can be flaky.
 # We add the src/ root to sys.path so `client.*` imports work consistently.
@@ -35,6 +37,58 @@ with st.expander("Privacy & what NOT to paste (PII guardrail)", expanded=False):
 def _default_docs_dir() -> str:
     # Default docs location for our demo. Override in the sidebar.
     return str((Path(__file__).resolve().parents[3] / "docs").resolve())
+
+
+_DEMO_STATE_DIR = (Path(__file__).resolve().parents[3] / ".demo_state").resolve()
+_DOCS_FINGERPRINT_FILE = _DEMO_STATE_DIR / "docs_fingerprint.json"
+
+
+def _compute_docs_fingerprint(folder_path: str) -> dict:
+    """Build a quick fingerprint of PDFs (names + mtimes + sizes).
+
+    We intentionally do not hash full PDF bytes to keep this fast.
+    """
+    folder = Path(folder_path).expanduser().resolve()
+    pdf_paths = sorted([p for p in folder.rglob("*.pdf") if p.is_file()])
+
+    items: list[dict] = []
+    for p in pdf_paths:
+        stat = p.stat()
+        items.append(
+            {
+                "path": str(p.relative_to(folder)).replace("\\", "/"),
+                "size": int(stat.st_size),
+                "mtime_ns": int(stat.st_mtime_ns),
+            }
+        )
+
+    payload = {
+        "root": str(folder).replace("\\", "/"),
+        "pdf_count": len(items),
+        "items": items,
+    }
+    stable = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    digest = hashlib.sha256(stable.encode("utf-8")).hexdigest()
+    return {
+        "root": payload["root"],
+        "pdf_count": payload["pdf_count"],
+        "hash": digest,
+        "computed_from": "path+size+mtime_ns",
+    }
+
+
+def _load_saved_docs_fingerprint() -> dict | None:
+    try:
+        if _DOCS_FINGERPRINT_FILE.exists():
+            return json.loads(_DOCS_FINGERPRINT_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return None
+
+
+def _save_docs_fingerprint(fp: dict) -> None:
+    _DEMO_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    _DOCS_FINGERPRINT_FILE.write_text(json.dumps(fp, indent=2), encoding="utf-8")
 
 
 def _run(coro):
@@ -119,7 +173,10 @@ with st.sidebar:
             index_status_payload
             and index_status_payload.get("status") == "ok"
             and index_status_payload.get("collection_exists")
-            and (index_status_payload.get("points_count") is None or (index_status_payload.get("points_count") or 0) > 0)
+            and (
+                index_status_payload.get("points_count") is None
+                or (index_status_payload.get("points_count") or 0) > 0
+            )
         )
         openai_ready = bool(index_status_payload and index_status_payload.get("openai_configured"))
         ingest_ok = bool(last_ingest and (last_ingest.get("files_total") or 0) > 0)
@@ -130,8 +187,12 @@ with st.sidebar:
         st.write(f"1) Server health: {'OK' if server_ok else 'Run Health'}")
         st.write(f"2) Index status: {'Ready' if index_ready else 'Refresh Status'}")
         st.write(f"3) OpenAI configured: {'OK' if openai_ready else 'Missing OPENAI_API_KEY'}")
-        st.write(f"4) Ingest docs: {'Done' if ingest_ok else 'Run Ingest'}")
-        st.write(f"5) Index docs: {'Done' if index_ok else 'Run Index'}")
+        if index_ready:
+            st.write("4) Ingest docs: Optional")
+            st.write("5) Index docs: Optional")
+        else:
+            st.write(f"4) Ingest docs: {'Done' if ingest_ok else 'Run Ingest'}")
+            st.write(f"5) Index docs: {'Done' if index_ok else 'Run Index'}")
         st.write("6) Ask a question: include the peril + what you want covered")
 
         if demo_ready:
@@ -139,11 +200,12 @@ with st.sidebar:
         else:
             st.warning("Demo not ready yet")
 
-    st.subheader("Documents")
-    docs_dir = st.text_input("Docs folder (absolute path)", value=_default_docs_dir())
-    max_pages = st.number_input("Max PDF pages (per file)", min_value=1, max_value=200, value=25, step=1)
-    chunk_size = st.number_input("Chunk size", min_value=200, max_value=4000, value=1200, step=50)
-    overlap = st.number_input("Chunk overlap", min_value=0, max_value=1000, value=150, step=25)
+    with st.expander("Policy docs (local) + chunking settings", expanded=False):
+        st.caption("Choose where the PDFs live and how we chunk them for retrieval.")
+        docs_dir = st.text_input("Docs folder (absolute path)", value=_default_docs_dir())
+        max_pages = st.number_input("Max PDF pages (per file)", min_value=1, max_value=200, value=25, step=1)
+        chunk_size = st.number_input("Chunk size", min_value=200, max_value=4000, value=1200, step=50)
+        overlap = st.number_input("Chunk overlap", min_value=0, max_value=1000, value=150, step=25)
 
     st.divider()
     st.subheader("Indexing")
@@ -178,11 +240,72 @@ with st.sidebar:
         if show_status:
             st.json(status_payload)
 
+    # Indexing intent:
+    # - If the collection does NOT exist yet: indexing is required.
+    # - If the collection already exists: only index again if the user says they added/changed docs.
+    status_payload = st.session_state.get("index_status")
+    status_known = bool(status_payload)
+    q_ok = bool(status_payload and status_payload.get("status") == "ok")
+    collection_exists = bool(status_payload and status_payload.get("collection_exists"))
+    index_has_points = bool(
+        status_payload
+        and status_payload.get("collection_exists")
+        and (status_payload.get("points_count") is None or (status_payload.get("points_count") or 0) > 0)
+    )
+
+    wants_reindex = False
+    docs_changed = False
+    if status_known and q_ok and collection_exists:
+        if "saved_docs_fingerprint" not in st.session_state:
+            st.session_state["saved_docs_fingerprint"] = _load_saved_docs_fingerprint()
+
+        saved_fp = st.session_state.get("saved_docs_fingerprint")
+        current_fp = None
+        try:
+            if Path(docs_dir).exists():
+                current_fp = _compute_docs_fingerprint(docs_dir)
+        except Exception:
+            current_fp = None
+
+        if saved_fp and current_fp and saved_fp.get("root") == current_fp.get("root"):
+            docs_changed = bool(saved_fp.get("hash") and current_fp.get("hash") and saved_fp["hash"] != current_fp["hash"])
+
+        if docs_changed:
+            st.warning("Docs look different since the last index. Re-index to pick up the changes.")
+            if "wants_reindex" not in st.session_state:
+                st.session_state["wants_reindex"] = True
+        elif index_has_points:
+            st.caption("Index already exists. Skipping indexing unless docs changed.")
+
+        wants_reindex = st.checkbox(
+            "I added/updated documents — re-index",
+            key="wants_reindex",
+            value=bool(st.session_state.get("wants_reindex", False)),
+            help="Use this only when you changed PDFs under the docs folder.",
+        )
+
     col_a, col_b = st.columns(2)
     with col_a:
         do_ingest = st.button("Ingest Folder")
     with col_b:
-        do_index = st.button("Index to Qdrant")
+        index_disabled = True
+        if not status_known:
+            index_disabled = True
+        elif not q_ok:
+            index_disabled = True
+        elif not collection_exists:
+            index_disabled = False
+        else:
+            index_disabled = not wants_reindex
+
+        do_index = st.button(
+            "Index to Qdrant",
+            disabled=index_disabled,
+            help=(
+                "First refresh index status. Indexing runs automatically only when the collection is missing; "
+                "otherwise enable re-index after adding new docs."
+            ),
+        )
 
     # Quick health check before running the demo.
     if st.button("Server Health"):
@@ -196,39 +319,118 @@ with st.sidebar:
 
     if do_ingest:
         try:
-            with st.spinner("Ingesting documents..."):
-                payload = _run(
-                    mcp_client.ingest_folder(
-                        folder_path=docs_dir,
-                        max_pages=int(max_pages),
-                        chunk_size=int(chunk_size),
-                        overlap=int(overlap),
-                    )
+            status_line = st.empty()
+            bar = st.progress(0)
+            details = st.caption("")
+
+            status_line.info("Starting ingest…")
+            job = _run(
+                mcp_client.start_ingest_job(
+                    folder_path=docs_dir,
+                    max_pages=int(max_pages),
+                    chunk_size=int(chunk_size),
+                    overlap=int(overlap),
                 )
-            st.session_state["last_ingest"] = payload
-            st.success("Ingest completed")
+            )
+            job_id = (job or {}).get("job_id")
+            if not job_id:
+                raise RuntimeError("Failed to start ingest job")
+
+            while True:
+                s = _run(mcp_client.job_status(job_id))
+                if s.get("status") == "error":
+                    raise RuntimeError(s.get("error") or "Job status error")
+
+                status_line.info(s.get("message") or "Ingesting…")
+                prog = (s.get("progress") or {})
+                files_total = int(prog.get("files_total") or 0)
+                files_done = int(prog.get("files_done") or 0)
+                chunks_total = prog.get("chunks_total")
+                pct = (files_done / files_total) if files_total else 0.0
+                bar.progress(min(1.0, max(0.0, pct)))
+                extra = f"Files: {files_done}/{files_total}"
+                if chunks_total is not None:
+                    extra += f" • Chunks counted: {int(chunks_total)}"
+                details.caption(extra)
+
+                if s.get("status") in {"completed", "failed"}:
+                    if s.get("status") == "failed":
+                        raise RuntimeError(s.get("error") or "Ingest failed")
+                    payload = s.get("result") or {}
+                    st.session_state["last_ingest"] = payload
+                    status_line.success("Ingest completed")
+                    bar.progress(1.0)
+                    break
+
+                time.sleep(0.35)
         except Exception as e:
             st.error(f"Ingest failed: {e}")
 
     if do_index:
         try:
-            with st.spinner("Indexing into Qdrant..."):
-                payload = _run(
-                    mcp_client.index_folder_qdrant(
-                        folder_path=docs_dir,
-                        max_pages=int(max_pages),
-                        chunk_size=int(chunk_size),
-                        overlap=int(overlap),
-                    )
-                )
-            st.session_state["last_index"] = payload
-            st.success("Index completed")
+            status_line = st.empty()
+            bar = st.progress(0)
+            details = st.caption("")
 
-            # Keep the sidebar honest right after indexing.
-            try:
-                st.session_state["index_status"] = _run(mcp_client.index_status())
-            except Exception:
-                pass
+            status_line.info("Starting indexing…")
+            job = _run(
+                mcp_client.start_index_job(
+                    folder_path=docs_dir,
+                    max_pages=int(max_pages),
+                    chunk_size=int(chunk_size),
+                    overlap=int(overlap),
+                    batch_size=64,
+                )
+            )
+            job_id = (job or {}).get("job_id")
+            if not job_id:
+                raise RuntimeError("Failed to start index job")
+
+            while True:
+                s = _run(mcp_client.job_status(job_id))
+                if s.get("status") == "error":
+                    raise RuntimeError(s.get("error") or "Job status error")
+
+                status_line.info(s.get("message") or "Indexing…")
+                prog = (s.get("progress") or {})
+                batches_total = int(prog.get("batches_total") or 0)
+                batches_done = int(prog.get("batches_done") or 0)
+                points_upserted = int(prog.get("points_upserted") or 0)
+                files_total = int(prog.get("files_total") or 0)
+                files_done = int(prog.get("files_done") or 0)
+
+                pct = (batches_done / batches_total) if batches_total else ((files_done / files_total) if files_total else 0.0)
+                bar.progress(min(1.0, max(0.0, pct)))
+
+                extra = f"Files: {files_done}/{files_total} • Batches: {batches_done}/{batches_total or '?'} • Points upserted: {points_upserted}"
+                details.caption(extra)
+
+                if s.get("status") in {"completed", "failed"}:
+                    if s.get("status") == "failed":
+                        raise RuntimeError(s.get("error") or "Index failed")
+                    payload = s.get("result") or {}
+                    st.session_state["last_index"] = payload
+                    status_line.success("Index completed")
+                    bar.progress(1.0)
+
+                    # Record the current docs snapshot as the "indexed" baseline.
+                    try:
+                        fp = _compute_docs_fingerprint(docs_dir)
+                        st.session_state["saved_docs_fingerprint"] = fp
+                        _save_docs_fingerprint(fp)
+                        st.session_state["wants_reindex"] = False
+                    except Exception:
+                        pass
+
+                    # Keep the sidebar honest right after indexing.
+                    try:
+                        st.session_state["index_status"] = _run(mcp_client.index_status())
+                    except Exception:
+                        pass
+
+                    break
+
+                time.sleep(0.35)
         except Exception as e:
             st.error(f"Index failed: {e}")
 
@@ -300,7 +502,7 @@ demo_ready = bool(
 )
 
 if not demo_ready:
-    st.info("Preflight: refresh index status, then ingest + index docs before asking.")
+    _render_next_steps(status_payload=status_payload)
 
 ask = st.button("Ask Concierge", type="primary", disabled=not (consent and demo_ready))
 
