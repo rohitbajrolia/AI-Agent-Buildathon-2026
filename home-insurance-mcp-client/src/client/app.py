@@ -313,7 +313,7 @@ with st.sidebar:
             payload = _run(mcp_client.health())
             st.session_state["last_health"] = payload
             st.success("Server is up and running")
-            with st.expander("Health details (optional)", expanded=False):
+            with st.expander("Health details", expanded=False):
                 st.json(payload)
         except Exception as e:
             st.error(f"Health check failed: {e}")
@@ -479,10 +479,10 @@ with right:
         value=False
     )
 
-    with st.expander("Quote snapshot (optional)", expanded=False):
-        st.caption("Paste a quote/rating summary and normalize key fields.")
-        quote_text = st.text_area("Quote text", key="quote_text", height=120)
-        if st.button("Normalize quote snapshot"):
+    with st.expander("Quote / rating summary", expanded=False):
+        st.caption("Paste a quote or rating summary. This normalizes it into key fields for the demo.")
+        quote_text = st.text_area("Quote / rating text", key="quote_text", height=120)
+        if st.button("Normalize quote / rating summary"):
             try:
                 st.session_state["quote_snapshot"] = _run(mcp_client.normalize_quote_snapshot(raw_text=quote_text))
                 st.success("Normalized")
@@ -589,7 +589,7 @@ if ask:
 
     # ---------- HANDOFF / ESCALATION ----------
     if not blocked:
-        st.subheader("Handoff to human agent (optional)")
+        st.subheader("Handoff to human agent")
         st.caption("Useful for compliance: summarize findings without making a binding decision.")
         if st.button("Generate handoff summary"):
             summary = out.get("handoff_summary", None)
