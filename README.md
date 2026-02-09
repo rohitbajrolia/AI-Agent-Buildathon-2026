@@ -1,13 +1,13 @@
 # Home Insurance Coverage Concierge (MCP + Qdrant + Streamlit)
 
-This workspace is a local demo that answers homeowners insurance coverage questions grounded in your policy PDFs.
+This workspace is a local application that answers homeowners insurance coverage questions grounded in your policy PDFs.
 It runs three parts: Qdrant for vector search, an MCP tool server for ingest/index/retrieve, and a Streamlit UI that runs a LangGraph workflow to produce a cited answer.
 
 ## What this application provides (brief)
 
 - Policy-grounded Q&A with citations tied to retrieved snippets.
 - Explicit ingest and index steps so you control when docs are processed.
-- An audit trail with redacted previews for demo transparency.
+- An audit trail with redacted previews for transparency.
 - Local-first docs: policy PDFs stay under `docs/` and are git-ignored.
 
 ## Flow (correct order, what each step does)

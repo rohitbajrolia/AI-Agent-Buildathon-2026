@@ -20,22 +20,22 @@ from client import mcp_client
 st.set_page_config(page_title="Home Insurance Coverage Concierge", layout="wide")
 
 # ---------- ALWAYS-VISIBLE COMPLIANCE HEADER ----------
-st.title("🏠 Coverage Concierge (Policy-Grounded)")
+st.title("Coverage Concierge (Policy-Grounded)")
 st.warning(
-    "Educational use only — not legal advice, underwriting, or a binding coverage decision. "
+    "Educational use only - not legal advice, underwriting, or a binding coverage decision. "
     "Coverage depends on your full policy, endorsements, declarations, and claim facts."
 )
 
-with st.expander("Privacy & what NOT to paste (PII guardrail)", expanded=False):
+with st.expander("Privacy: what not to paste (PII)", expanded=False):
     st.markdown(
         "- Do **not** paste: SSN, bank/credit card numbers, full address, DOB, policy number, claim number.\n"
         "- If your documents contain PII, keep them local (as you are doing). Only the cited snippets are shown.\n"
-        "- For the demo, use redacted documents whenever possible."
+        "- Use redacted documents whenever possible."
     )
 
 
 def _default_docs_dir() -> str:
-    # Default docs location for our demo. Override in the sidebar.
+    # Default docs location. Override in the sidebar.
     return str((Path(__file__).resolve().parents[3] / "docs").resolve())
 
 
@@ -46,7 +46,7 @@ _DOCS_FINGERPRINT_FILE = _DEMO_STATE_DIR / "docs_fingerprint.json"
 def _compute_docs_fingerprint(folder_path: str) -> dict:
     """Build a quick fingerprint of PDFs (names + mtimes + sizes).
 
-    We intentionally do not hash full PDF bytes to keep this fast.
+    We avoid hashing full PDFs here. It is slow and no fun.
     """
     folder = Path(folder_path).expanduser().resolve()
     pdf_paths = sorted([p for p in folder.rglob("*.pdf") if p.is_file()])
@@ -133,8 +133,8 @@ def _render_next_steps(*, status_payload: dict | None) -> None:
     steps: list[str] = []
 
     if not status_payload:
-        steps.append("Click ‘Refresh Index Status’ in the sidebar.")
-        steps.append("If the collection doesn’t exist yet, run ‘Index to Qdrant’.")
+        steps.append("Click 'Refresh Index Status' in the sidebar.")
+        steps.append("If the collection doesn't exist yet, run 'Index to Qdrant'.")
     else:
         q_ok = status_payload.get("status") == "ok"
         collection_exists = bool(status_payload.get("collection_exists"))
@@ -143,15 +143,15 @@ def _render_next_steps(*, status_payload: dict | None) -> None:
         openai_configured = bool(status_payload.get("openai_configured"))
 
         if openai_configured and openai_ok is False:
-            steps.append("Your OPENAI_API_KEY is present but invalid — update it and refresh index status.")
+            steps.append("Your OPENAI_API_KEY is present but invalid - update it and refresh index status.")
         elif not openai_configured:
             steps.append("Set OPENAI_API_KEY (server + client), then refresh index status.")
         elif not q_ok:
             steps.append("Make sure Qdrant is running, then refresh index status.")
         elif not collection_exists:
-            steps.append("Run ‘Index to Qdrant’ (first-time setup).")
+            steps.append("Run 'Index to Qdrant' (first-time setup).")
         elif points_count == 0:
-            steps.append("Index exists but is empty — run ‘Index to Qdrant’. ")
+            steps.append("Index exists but is empty - run 'Index to Qdrant'.")
 
     steps.append("If results still look thin, try a more specific question (peril + coverage + location).")
 
@@ -159,8 +159,8 @@ def _render_next_steps(*, status_payload: dict | None) -> None:
 
 
 with st.sidebar:
-    with st.expander("Demo checklist", expanded=True):
-        st.caption("A quick path that keeps the live demo predictable.")
+    with st.expander("Setup checklist", expanded=True):
+        st.caption("A quick path that keeps setup predictable.")
 
         last_health = st.session_state.get("last_health")
         index_status_payload = st.session_state.get("index_status")
@@ -196,9 +196,9 @@ with st.sidebar:
         st.write("6) Ask a question: include the peril + what you want covered")
 
         if demo_ready:
-            st.success("Demo is ready to run")
+            st.success("Ready to run")
         else:
-            st.warning("Demo not ready yet")
+            st.warning("Not ready yet")
 
     with st.expander("Policy docs (local) + chunking settings", expanded=False):
         st.caption("Choose where the PDFs live and how we chunk them for retrieval.")
@@ -278,7 +278,7 @@ with st.sidebar:
             st.caption("Index already exists. Skipping indexing unless docs changed.")
 
         wants_reindex = st.checkbox(
-            "I added/updated documents — re-index",
+            "I added/updated documents - re-index",
             key="wants_reindex",
             value=bool(st.session_state.get("wants_reindex", False)),
             help="Use this only when you changed PDFs under the docs folder.",
@@ -307,7 +307,7 @@ with st.sidebar:
             ),
         )
 
-    # Quick health check before running the demo.
+    # Quick health check before running.
     if st.button("Server Health"):
         try:
             payload = _run(mcp_client.health())
@@ -324,7 +324,7 @@ with st.sidebar:
             bar = st.progress(0)
             details = st.caption("")
 
-            status_line.info("Starting ingest…")
+            status_line.info("Starting ingest...")
             job = _run(
                 mcp_client.start_ingest_job(
                     folder_path=docs_dir,
@@ -342,7 +342,7 @@ with st.sidebar:
                 if s.get("status") == "error":
                     raise RuntimeError(s.get("error") or "Job status error")
 
-                status_line.info(s.get("message") or "Ingesting…")
+                status_line.info(s.get("message") or "Ingesting...")
                 prog = (s.get("progress") or {})
                 files_total = int(prog.get("files_total") or 0)
                 files_done = int(prog.get("files_done") or 0)
@@ -351,7 +351,7 @@ with st.sidebar:
                 bar.progress(min(1.0, max(0.0, pct)))
                 extra = f"Files: {files_done}/{files_total}"
                 if chunks_total is not None:
-                    extra += f" • Chunks counted: {int(chunks_total)}"
+                    extra += f" - Chunks counted: {int(chunks_total)}"
                 details.caption(extra)
 
                 if s.get("status") in {"completed", "failed"}:
@@ -373,7 +373,7 @@ with st.sidebar:
             bar = st.progress(0)
             details = st.caption("")
 
-            status_line.info("Starting indexing…")
+            status_line.info("Starting indexing...")
             job = _run(
                 mcp_client.start_index_job(
                     folder_path=docs_dir,
@@ -392,7 +392,7 @@ with st.sidebar:
                 if s.get("status") == "error":
                     raise RuntimeError(s.get("error") or "Job status error")
 
-                status_line.info(s.get("message") or "Indexing…")
+                status_line.info(s.get("message") or "Indexing...")
                 prog = (s.get("progress") or {})
                 batches_total = int(prog.get("batches_total") or 0)
                 batches_done = int(prog.get("batches_done") or 0)
@@ -403,7 +403,7 @@ with st.sidebar:
                 pct = (batches_done / batches_total) if batches_total else ((files_done / files_total) if files_total else 0.0)
                 bar.progress(min(1.0, max(0.0, pct)))
 
-                extra = f"Files: {files_done}/{files_total} • Batches: {batches_done}/{batches_total or '?'} • Points upserted: {points_upserted}"
+                extra = f"Files: {files_done}/{files_total} - Batches: {batches_done}/{batches_total or '?'} - Points upserted: {points_upserted}"
                 details.caption(extra)
 
                 if s.get("status") in {"completed", "failed"}:
@@ -457,7 +457,7 @@ with left:
         st.session_state["question_text"] = DEMO_QUESTION_PRESETS["Water backup / sump pump"]
 
     st.selectbox(
-        "Quick question presets (demo)",
+        "Quick question presets",
         options=["(custom)"] + list(DEMO_QUESTION_PRESETS.keys()),
         index=0,
         key="preset_choice",
@@ -471,16 +471,98 @@ with left:
     )
 
 with right:
-    st.caption("Demo controls (for compliance + transparency)")
-    state = st.selectbox("Jurisdiction / State (demo)", ["IL", "CA", "NY", "TX", "FL"], index=0)
+    st.caption("Controls (compliance + transparency)")
+    state = st.selectbox("Jurisdiction / State", ["IL", "CA", "NY", "TX", "FL"], index=0)
     require_citations = st.checkbox("Require citations (block answers without sources)", value=True)
     consent = st.checkbox(
-        "I confirm I’m using redacted/non-sensitive data for this demo.",
+        "I confirm I'm using redacted/non-sensitive data.",
         value=False
     )
 
+    with st.expander("Impact & metrics", expanded=False):
+        st.caption("Keep these numbers honest. If these are estimates, say so.")
+
+        if "impact_metrics" not in st.session_state:
+            st.session_state["impact_metrics"] = {
+                "baseline_handle_time_minutes": 12.0,
+                "target_handle_time_minutes": 7.0,
+                "first_contact_resolution_uplift_pct": 12.0,
+                "deflection_rate_pct": 15.0,
+                "escalation_reduction_pct": 10.0,
+                "notes": "Assumptions: common coverage questions; policy packet indexed; agent used for first-pass guidance with citations.",
+            }
+
+        m = dict(st.session_state.get("impact_metrics") or {})
+
+        baseline = st.number_input(
+            "Baseline handle time (minutes)",
+            min_value=1.0,
+            max_value=120.0,
+            value=float(m.get("baseline_handle_time_minutes", 12.0)),
+            step=1.0,
+        )
+        target = st.number_input(
+            "Target handle time (minutes)",
+            min_value=1.0,
+            max_value=120.0,
+            value=float(m.get("target_handle_time_minutes", 7.0)),
+            step=1.0,
+        )
+        fcr = st.number_input(
+            "First-contact resolution uplift (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=float(m.get("first_contact_resolution_uplift_pct", 12.0)),
+            step=1.0,
+        )
+        deflect = st.number_input(
+            "Deflection rate (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=float(m.get("deflection_rate_pct", 15.0)),
+            step=1.0,
+        )
+        esc_red = st.number_input(
+            "Escalation reduction (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=float(m.get("escalation_reduction_pct", 10.0)),
+            step=1.0,
+        )
+        notes = st.text_area(
+            "Assumptions / notes",
+            value=str(m.get("notes") or ""),
+            height=90,
+        )
+
+        reduction_pct = 0.0
+        if baseline > 0:
+            reduction_pct = max(0.0, min(100.0, (baseline - target) / baseline * 100.0))
+
+        st.info(
+            f"Estimated handle-time reduction: {reduction_pct:.0f}% (from {baseline:.0f} -> {target:.0f} minutes)"
+        )
+
+        impact_payload = {
+            "baseline_handle_time_minutes": float(baseline),
+            "target_handle_time_minutes": float(target),
+            "estimated_handle_time_reduction_pct": float(round(reduction_pct, 2)),
+            "first_contact_resolution_uplift_pct": float(fcr),
+            "deflection_rate_pct": float(deflect),
+            "escalation_reduction_pct": float(esc_red),
+            "notes": notes,
+        }
+
+        st.session_state["impact_metrics"] = impact_payload
+        st.download_button(
+            "Download impact snapshot (JSON)",
+            data=json.dumps(impact_payload, indent=2, ensure_ascii=False),
+            file_name="impact_snapshot.json",
+            mime="application/json",
+        )
+
     with st.expander("Quote / rating summary", expanded=False):
-        st.caption("Paste a quote or rating summary. This normalizes it into key fields for the demo.")
+        st.caption("Paste a quote or rating summary. This normalizes it into key fields.")
         quote_text = st.text_area("Quote / rating text", key="quote_text", height=120)
         if st.button("Normalize quote / rating summary"):
             try:
@@ -547,12 +629,22 @@ if ask:
 
     else:
         # ---------- ANSWER ----------
-        st.subheader("Answer (grounded)")
+        st.subheader("Answer (with sources)")
         st.write(answer)
+
+        # ---------- INNOVATION: ENDORSEMENT CONFLICT DETECTION ----------
+        endorsement_signals = out.get("endorsement_signals")
+        if isinstance(endorsement_signals, dict) and endorsement_signals.get("present"):
+            with st.expander("Endorsement override check", expanded=False):
+                st.caption(
+                    "If endorsements show up, we flag possible overrides so you know what to verify. "
+                    "This helps avoid confident-but-wrong answers when endorsements change the base policy."
+                )
+                st.json(endorsement_signals)
 
         # ---------- SOURCE TRANSPARENCY ----------
         st.subheader("Sources used (snippets)")
-        show_unredacted = st.checkbox("Show unredacted snippets (local demo only)", value=False)
+        show_unredacted = st.checkbox("Show unredacted snippets (local only)", value=False)
         if raw_results:
             rows = []
             for r in raw_results:
@@ -590,23 +682,64 @@ if ask:
     # ---------- HANDOFF / ESCALATION ----------
     if not blocked:
         st.subheader("Handoff to human agent")
-        st.caption("Useful for compliance: summarize findings without making a binding decision.")
-        if st.button("Generate handoff summary"):
-            summary = out.get("handoff_summary", None)
-            if not summary:
-                # fallback: create a simple summary from available fields
-                summary = (
-                    f"User question: {question}\n"
-                    f"State: {state}\n"
-                    f"Top sources used:\n{sources}\n"
-                    "Request: Please review the full policy packet and confirm coverage and any exclusions."
+        st.caption("Useful for compliance: share a structured summary with citations for a human reviewer.")
+
+        col_h1, col_h2, col_h3 = st.columns([1, 1, 1])
+        with col_h1:
+            create_ticket = st.button("Create handoff ticket (MCP)")
+        with col_h2:
+            show_ticket = st.checkbox("Show last ticket", value=True)
+        with col_h3:
+            list_tickets = st.button("List tickets")
+
+        sanitized_matches = _sanitize_retrieved_matches_for_audit(raw_results)
+
+        if create_ticket:
+            try:
+                payload = _run(
+                    mcp_client.create_handoff_ticket(
+                        question=question,
+                        state=state,
+                        answer=answer,
+                        sources=sources,
+                        run_id=run_id,
+                        retrieved_matches=sanitized_matches,
+                        notes="Includes citations and redacted snippet previews only.",
+                    )
                 )
-            st.text_area("Handoff summary", value=summary, height=180)
+                st.session_state["last_handoff_ticket"] = payload
+                ticket_id = (payload or {}).get("ticket_id")
+                if ticket_id:
+                    st.success(f"Created ticket {ticket_id}")
+                else:
+                    st.success("Created ticket")
+            except Exception as e:
+                st.error(f"Ticket creation failed: {e}")
+
+        if list_tickets:
+            try:
+                st.session_state["handoff_tickets"] = _run(mcp_client.list_handoff_tickets(limit=20))
+            except Exception as e:
+                st.error(f"List tickets failed: {e}")
+
+        if show_ticket and st.session_state.get("last_handoff_ticket"):
+            t = st.session_state.get("last_handoff_ticket")
+            st.json(t)
+            st.download_button(
+                "Download last handoff ticket (JSON)",
+                data=json.dumps(t, indent=2, ensure_ascii=False),
+                file_name=f"handoff_ticket_{(t or {}).get('ticket_id') or (run_id or 'run')}.json",
+                mime="application/json",
+            )
+
+        if st.session_state.get("handoff_tickets"):
+            with st.expander("Recent tickets", expanded=False):
+                st.json(st.session_state.get("handoff_tickets"))
 
     # ---------- AUDIT TRAIL ----------
     with st.expander("Audit trail", expanded=True):
         st.caption(
-            "This log is designed for demo/audit. It does not store full prompts, and it redacts common PII patterns in text previews."
+            "This log is for audit and troubleshooting. It does not store full prompts, and it redacts common PII patterns in text previews."
         )
 
         sanitized_matches = _sanitize_retrieved_matches_for_audit(raw_results)

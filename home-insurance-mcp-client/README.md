@@ -1,10 +1,10 @@
 # Home Insurance MCP (Client)
 
-This repo is the demo client. It runs a Streamlit UI and a LangGraph workflow that retrieves evidence from the MCP server and produces a cited answer.
+This repo is the client. It runs a Streamlit UI and a LangGraph workflow that retrieves evidence from the MCP server and produces a cited answer.
 
 ## What it provides
 
-- Streamlit UI for policy-grounded Q&A and demo controls.
+- Streamlit UI for policy-grounded Q&A and controls.
 - LangGraph pipeline: retrieve -> validate -> answer -> citation_verify.
 - Audit trail with redacted previews and a one-click JSON download.
 - Manual ingest/index controls and a readiness indicator.
@@ -76,7 +76,7 @@ cd /c/AI-Agent-Buildathon-2026
 bash ./stop_demo.sh
 ```
 
-## Demo preflight
+## Preflight checks
 
 Run:
 
@@ -86,9 +86,9 @@ python scripts/client_smoke.py
 python scripts/graph_smoke.py
 ```
 
-Good looks like this: `demo_preflight.py` prints `PASS (demo-ready)`, `client_smoke.py` shows `openai_ok: true` and a non-zero `points_count`, and `graph_smoke.py` exits `0`.
+Good looks like this: `demo_preflight.py` prints `PASS (ready)`, `client_smoke.py` shows `openai_ok: true` and a non-zero `points_count`, and `graph_smoke.py` exits `0`.
 
-## The 90-second demo script
+## Quick walkthrough
 
 1. Sidebar -> Server Health (confirms the server is reachable).
 2. Sidebar -> Refresh Index Status. If it says Not indexed yet, run Index to Qdrant.
@@ -107,4 +107,4 @@ Good looks like this: `demo_preflight.py` prints `PASS (demo-ready)`, `client_sm
 
 - If you need access from another device, run Streamlit with `--server.address 0.0.0.0` and start the MCP server with `MCP_HOST=0.0.0.0`. Then set `MCP_SERVER_URL` to your machine's LAN IP (for example, `http://192.168.1.10:4200/mcp/`).
 - Keep documents local and preferably redacted. The audit trace stores short, redacted previews of user text.
-- The demo is designed around citations. If you turn off Require citations, you are choosing a less strict mode.
+- The system is designed around citations. If you turn off Require citations, you are choosing a less strict mode.

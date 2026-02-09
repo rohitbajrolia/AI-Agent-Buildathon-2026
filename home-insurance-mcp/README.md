@@ -1,6 +1,6 @@
 # Home Insurance MCP (Server)
 
-This repo runs the MCP tool server for the demo. It exposes Streamable HTTP tools that ingest policy docs, index them in Qdrant, and retrieve evidence for the client UI.
+This repo runs the MCP tool server for the application. It exposes Streamable HTTP tools that ingest policy docs, index them in Qdrant, and retrieve evidence for the client UI.
 
 ## What it provides
 
@@ -106,7 +106,7 @@ Healthy means:
 
 ## Start / stop (workspace scripts)
 
-For the full demo (server + UI):
+For the full run (server + UI):
 
 ```bash
 cd /c/AI-Agent-Buildathon-2026
