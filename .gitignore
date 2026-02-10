@@ -24,9 +24,7 @@ __pycache__/
 # Local demo/UI state
 .demo_state/
 
-# Local writing / notes (keep out of git)
-BUILDATHON_SUBMISSION.md
-PITCH_90_SECONDS.md
+# OCR assets / source screenshots
 requirement/
 
 # Packaging / build artifacts

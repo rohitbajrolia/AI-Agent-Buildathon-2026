@@ -74,8 +74,22 @@ bash ./stop_demo.sh
 - Proposal doc: `BUILDATHON_SUBMISSION.md`
 - 90-second pitch: `PITCH_90_SECONDS.md`
 
+## Export (DOCX/PDF)
+
+Git Bash:
+
+```bash
+bash scripts/export_submission.sh
+```
+
+PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/export_submission.ps1
+```
+
 ## Impact (pilot targets)
 
-- Reduce policy clause lookup time from 12 minutes to 7 minutes (≈42% reduction)
-- Improve first-contact resolution by 10–15% for common coverage questions
-- Reduce escalations by 5–10% by making evidence and “what to verify” explicit
+- Reduce policy clause lookup time from 12 minutes to 7 minutes (~42% reduction)
+- Improve first-contact resolution by 10-15% for common coverage questions
+- Reduce escalations by 5-10% by making evidence and "what to verify" explicit

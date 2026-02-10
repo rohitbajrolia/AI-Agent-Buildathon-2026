@@ -1,4 +1,4 @@
-# Coverage Concierge — Project Brief
+# Coverage Concierge - Project Brief
 
 ## 1) Problem statement
 Homeowners policy packets are long and fragmented (policy booklet, declarations, endorsements, change notices). Teams repeatedly answer the same coverage questions while manually searching PDFs, reconciling endorsements, and explaining conditions and exclusions. This increases handle time, creates inconsistent guidance across agents, and raises risk when an answer is given without strong policy evidence.
@@ -12,7 +12,7 @@ A policy-grounded assistant that answers coverage questions using only retrieved
 3. Start the Streamlit UI (operator-facing experience).
 4. Ingest documents: extract text from PDFs (summaries only; no embeddings yet).
 5. Index documents: chunk text, embed, and upsert to Qdrant (progress tracked by job status).
-6. Ask a question: UI runs a workflow `retrieve → validate → answer → citation_verify`.
+6. Ask a question: UI runs a workflow `retrieve -> validate -> answer -> citation_verify`.
 7. If evidence is weak or citations do not verify, the run is blocked with clear next actions.
 8. If successful, UI shows the answer, sources table, snippets, and an audit trace download.
 
@@ -41,9 +41,9 @@ Pilot assumptions:
 - The assistant is used for first-pass guidance with citations; humans retain final decision authority.
 
 Target outcomes (example):
-- Reduce policy lookup / clause-finding time from 12 minutes to 7 minutes (≈42% reduction).
-- Improve first-contact resolution by 10–15% for common coverage questions.
-- Reduce escalations by 5–10% by providing cited evidence and clear “what to verify” guidance.
+- Reduce policy lookup / clause-finding time from 12 minutes to 7 minutes (~42% reduction).
+- Improve first-contact resolution by 10-15% for common coverage questions.
+- Reduce escalations by 5-10% by providing cited evidence and clear "what to verify" guidance.
 
 ## 7) Risks and guardrails
 - Privacy: UI warns against pasting PII; audit previews are redacted.
@@ -55,5 +55,5 @@ Target outcomes (example):
 - Median handle time for coverage questions.
 - First-contact resolution rate for the top 10 question types.
 - Escalation/reopen rate.
-- “Blocked-run rate” (too little evidence) and top reasons; used as a signal to improve document completeness/indexing.
+- "Blocked-run rate" (too little evidence) and top reasons; used as a signal to improve document completeness/indexing.
 - Audit trace export usage (as a proxy for explainability/compliance utility).

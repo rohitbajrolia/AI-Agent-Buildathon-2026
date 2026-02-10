@@ -35,6 +35,19 @@ h1, h2, h3 {
   letter-spacing: 0.2px;
 }
 
+a {
+  color: rgba(53, 104, 255, 0.95);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+hr {
+  border-color: var(--border);
+}
+
 /* Inputs */
 div[data-baseweb="input"] input,
 div[data-baseweb="textarea"] textarea {
@@ -76,11 +89,62 @@ details {
   padding: 6px 10px;
 }
 
+details > summary {
+  color: var(--text);
+  font-weight: 600;
+}
+
+details > summary:hover {
+  color: rgba(53, 104, 255, 0.95);
+}
+
+/* Code blocks */
+code {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px 6px;
+  color: var(--text);
+}
+
+pre {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+}
+
 /* Dataframe container */
 div[data-testid="stDataFrame"] {
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
+}
+
+/* Metric cards */
+div[data-testid="stMetric"] {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+div[data-testid="stMetric"] label {
+  color: var(--muted) !important;
+}
+
+/* Progress bars */
+div[data-testid="stProgress"] {
+  background: transparent;
+}
+
+div[data-testid="stProgress"] > div {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+div[data-testid="stProgress"] > div > div > div {
+  background-color: var(--accent) !important;
 }
 
 /* Caption + help text */
@@ -96,4 +160,13 @@ div[data-testid="stAlert"] {
 
 div[data-testid="stAlert"] p {
   color: var(--text);
+}
+
+/* Remove Streamlit chrome */
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+
+header[data-testid="stHeader"] {
+  background: rgba(14, 14, 16, 0.85);
+  border-bottom: 1px solid var(--border);
 }
