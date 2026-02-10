@@ -88,6 +88,17 @@ PowerShell:
 powershell -ExecutionPolicy Bypass -File scripts/export_submission.ps1
 ```
 
+## Testing (MCP)
+
+- MCP URL (default): `http://127.0.0.1:4200/mcp/`
+- MCP Inspector: connect to the URL above and run `health`, then `index_status`.
+- Smoke test (tool calls):
+
+```bash
+cd home-insurance-mcp-client
+python scripts/client_smoke.py
+```
+
 ## Impact (pilot targets)
 
 - Reduce policy clause lookup time from 12 minutes to 7 minutes (~42% reduction)

@@ -25,6 +25,10 @@ Coverage Concierge is a policy-grounded assistant that answers coverage question
 
 Reference: ARCHITECTURE.md
 
+Architecture diagram:
+
+![Coverage Concierge architecture](assets/architecture_diagram.svg)
+
 ## 5) MCP tools (what they do)
 - `health`: confirms tool server availability.
 - `index_status`: reports Qdrant reachability, collection presence, and embedding-provider configuration.
@@ -34,7 +38,33 @@ Reference: ARCHITECTURE.md
 - `start_ingest_job` / `start_index_job` + `job_status`: progress reporting for long-running operations.
 - `create_handoff_ticket` / `list_handoff_tickets`: structured payload for human review (redacted previews).
 
-## 6) Expected impact (quantified, with assumptions)
+## 6) Testing (MCP Inspector / Postman)
+
+You can validate the tool server independently of the UI.
+
+MCP Inspector:
+- Start the MCP server.
+- In MCP Inspector, connect to the server at `http://127.0.0.1:4200/mcp/`.
+- Run `health` first, then `index_status`, then a small `retrieve_clauses` call.
+
+Postman:
+- If you only need a quick connectivity check, test reachability on the same host/port.
+- For tool calls, MCP Inspector or the included smoke script is the most reliable option.
+
+Smoke script (recommended):
+
+```bash
+cd home-insurance-mcp-client
+python scripts/client_smoke.py
+```
+
+Quick curl check (reachability only; tool calls are not plain GET):
+
+```bash
+curl -i http://127.0.0.1:4200/mcp/
+```
+
+## 7) Expected impact (quantified, with assumptions)
 Pilot assumptions:
 - Common coverage questions handled by a service team.
 - Policy packet is already available and indexed for the relevant product/customer.
@@ -45,17 +75,17 @@ Target outcomes (example ranges):
 - Improve first-contact resolution by 10-15% for common coverage questions.
 - Reduce escalations by 5-10% by providing cited evidence and clear "what to verify" guidance.
 
-## Category alignment
+### Category alignment
 This use case aligns to **Insurance** (customer service and claims support). It focuses on policy-grounded answers, endorsement awareness, and auditability so teams can respond faster while remaining defensible.
 
-## 7) Safety and guardrails
+## 8) Safety and guardrails
 - Local-first documents: PDFs remain under `docs/` (ignored by git).
 - Privacy guardrails: UI warns against pasting PII; audit previews redact common patterns.
 - Evidence gating: blocks answers when retrieval is too weak to support a safe response.
 - Citation verification: checks citations against retrieved snippets; invalid citations trigger a rewrite or block.
 - Endorsement override awareness: when endorsements are retrieved, the workflow flags override risk.
 
-## 8) Success metrics (production)
+## 9) Success metrics (production)
 - Median handle time for coverage questions.
 - First-contact resolution rate for top question categories.
 - Escalation/reopen rate.

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560">
+  <defs>
+    <style>
+      .bg { fill: #ffffff; }
+      .box { fill: #ffffff; stroke: #111827; stroke-width: 2; rx: 18; }
+      .title { font-family: Segoe UI, Arial, sans-serif; font-size: 20px; font-weight: 700; fill: #111827; }
+      .text { font-family: Segoe UI, Arial, sans-serif; font-size: 16px; fill: #111827; }
+      .muted { font-family: Segoe UI, Arial, sans-serif; font-size: 14px; fill: #374151; }
+      .accent { fill: #3568FF; }
+      .arrow { stroke: #111827; stroke-width: 2.5; fill: none; marker-end: url(#arrowHead); }
+      .arrowAccent { stroke: #3568FF; stroke-width: 3; fill: none; marker-end: url(#arrowHeadAccent); }
+    </style>
+
+    <marker id="arrowHead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#111827" />
+    </marker>
+
+    <marker id="arrowHeadAccent" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#3568FF" />
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1200" height="560" />
+
+  <!-- Left: Documents -->
+  <rect class="box" x="60" y="210" width="250" height="140" />
+  <rect class="accent" x="60" y="210" width="250" height="10" />
+  <text class="title" x="80" y="255">Policy PDFs</text>
+  <text class="muted" x="80" y="285">Booklet, declarations,</text>
+  <text class="muted" x="80" y="307">endorsements, notices</text>
+
+  <!-- Center: UI -->
+  <rect class="box" x="360" y="70" width="330" height="160" />
+  <rect class="accent" x="360" y="70" width="330" height="10" />
+  <text class="title" x="380" y="115">Streamlit UI</text>
+  <text class="muted" x="380" y="145">Index controls, status,</text>
+  <text class="muted" x="380" y="167">question + answer view</text>
+
+  <!-- Center: Workflow -->
+  <rect class="box" x="360" y="280" width="330" height="200" />
+  <rect class="accent" x="360" y="280" width="330" height="10" />
+  <text class="title" x="380" y="325">Workflow</text>
+  <text class="muted" x="380" y="355">retrieve -> validate -> answer</text>
+  <text class="muted" x="380" y="377">-> citation_verify</text>
+  <text class="muted" x="380" y="412">Blocks when evidence is weak</text>
+  <text class="muted" x="380" y="434">Exports audit trace</text>
+
+  <!-- Right: MCP server -->
+  <rect class="box" x="740" y="110" width="380" height="170" />
+  <rect class="accent" x="740" y="110" width="380" height="10" />
+  <text class="title" x="760" y="155">MCP Server</text>
+  <text class="muted" x="760" y="185">/mcp (Streamable HTTP)</text>
+  <text class="muted" x="760" y="213">ingest, index, retrieve, status</text>
+
+  <!-- Right: Qdrant -->
+  <rect class="box" x="740" y="330" width="180" height="150" />
+  <rect class="accent" x="740" y="330" width="180" height="10" />
+  <text class="title" x="760" y="375">Qdrant</text>
+  <text class="muted" x="760" y="405">Vectors + metadata</text>
+  <text class="muted" x="760" y="427">Persistent volume</text>
+
+  <!-- Right: LLM provider -->
+  <rect class="box" x="940" y="330" width="180" height="150" />
+  <rect class="accent" x="940" y="330" width="180" height="10" />
+  <text class="title" x="960" y="375">OpenAI</text>
+  <text class="muted" x="960" y="405">Embeddings</text>
+  <text class="muted" x="960" y="427">Answer generation</text>
+
+  <!-- Arrows -->
+  <path class="arrow" d="M310 280 L360 280" />
+  <path class="arrow" d="M525 230 L525 280" />
+  <path class="arrowAccent" d="M690 160 L740 160" />
+  <path class="arrowAccent" d="M690 360 L740 360" />
+  <path class="arrow" d="M920 405 L940 405" />
+
+  <!-- Labels on arrows -->
+  <text class="muted" x="325" y="265">ingest</text>
+  <text class="muted" x="535" y="265">run</text>
+  <text class="muted" x="705" y="145">tools</text>
+  <text class="muted" x="705" y="345">index/retrieve</text>
+  <text class="muted" x="922" y="392">embed</text>
+
+  <!-- Footer note -->
+  <text class="muted" x="60" y="525">Coverage Concierge - components and data flow</text>
+</svg>

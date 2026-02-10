@@ -53,6 +53,16 @@ def _default_docs_dir() -> str:
 
 _DEMO_STATE_DIR = (Path(__file__).resolve().parents[3] / ".demo_state").resolve()
 _DOCS_FINGERPRINT_FILE = _DEMO_STATE_DIR / "docs_fingerprint.json"
+_FEEDBACK_FILE = _DEMO_STATE_DIR / "feedback.jsonl"
+
+
+def _append_feedback(record: dict) -> None:
+    try:
+        _DEMO_STATE_DIR.mkdir(parents=True, exist_ok=True)
+        with _FEEDBACK_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        return
 
 
 def _compute_docs_fingerprint(folder_path: str) -> dict:
@@ -601,14 +611,13 @@ if not demo_ready:
 
 ask = st.button("Ask Concierge", type="primary", disabled=not (consent and demo_ready))
 
-# ---------- RUN GRAPH ----------
-if ask:
+def _run_graph_once(*, question: str, state: str, require_citations: bool) -> dict:
     graph = build_graph()
+    graph_input: GraphState = {"question": question, "state": state, "require_citations": require_citations}
+    return graph.invoke(graph_input)
 
-    with st.spinner("Retrieving policy clauses (MCP) + generating answer..."):
-        graph_input: GraphState = {"question": question, "state": state, "require_citations": require_citations}
-        out = graph.invoke(graph_input)
 
+def _render_run(*, out: dict, question: str, state: str, require_citations: bool, status_payload: dict | None) -> None:
     answer = out.get("answer", "")
     sources = out.get("sources", "")
     raw_results = out.get("raw_results", [])
@@ -620,11 +629,44 @@ if ask:
     st.session_state["last_trace"] = trace
     st.session_state["last_run_id"] = run_id
 
-    # ---------- VALIDATION / ENFORCEMENT ----------
-    # Graph can block either due to weak evidence (pre-answer) or failed citation verification (post-answer).
+    top_a, top_b, top_c = st.columns([1, 1, 3])
+    with top_a:
+        if st.button("Retry", key=f"retry_{run_id or 'run'}"):
+            st.session_state["retry_requested"] = True
+            st.rerun()
+    with top_b:
+        if st.button("Edit question", key=f"editq_{run_id or 'run'}"):
+            st.session_state["preset_choice"] = "(custom)"
+            st.session_state["question_text"] = question
+            st.rerun()
+    with top_c:
+        note_key = f"fb_note_{run_id or 'run'}"
+        st.text_input("Feedback note (optional)", key=note_key, placeholder="Short note")
+        fb1, fb2, fb3 = st.columns([1, 1, 2])
+        with fb1:
+            up = st.button("Helpful", key=f"fb_up_{run_id or 'run'}")
+        with fb2:
+            down = st.button("Needs work", key=f"fb_down_{run_id or 'run'}")
+        with fb3:
+            st.caption("Saved locally to .demo_state/")
+
+        if up or down:
+            _append_feedback(
+                {
+                    "created_unix": int(time.time()),
+                    "run_id": run_id,
+                    "question_redacted": _redact_display_text(question),
+                    "state": state,
+                    "require_citations": bool(require_citations),
+                    "rating": "up" if up else "down",
+                    "note": str(st.session_state.get(note_key) or "").strip(),
+                }
+            )
+            st.success("Feedback saved")
+
     if blocked:
         st.error(
-            "Blocked: The agent could not retrieve strong enough evidence to answer safely. "
+            "Blocked: The workflow could not retrieve strong enough evidence to answer safely. "
             "Try ingest/indexing more docs or rephrasing the question."
         )
         if validation:
@@ -635,120 +677,112 @@ if ask:
             if next_actions:
                 st.subheader("What to do next")
                 st.markdown("- " + "\n- ".join(next_actions))
-        st.subheader("What the agent found")
+
+        st.subheader("What was retrieved")
         st.code(sources or "(no sources found)")
         _render_next_steps(status_payload=status_payload)
+        return
 
-    else:
-        # ---------- ANSWER ----------
-        st.subheader("Answer (with sources)")
-        st.write(answer)
+    st.subheader("Answer (with sources)")
+    st.write(answer)
 
-        # ---------- INNOVATION: ENDORSEMENT CONFLICT DETECTION ----------
-        endorsement_signals = out.get("endorsement_signals")
-        if isinstance(endorsement_signals, dict) and endorsement_signals.get("present"):
-            with st.expander("Endorsement override check", expanded=False):
-                st.caption(
-                    "If endorsements show up, we flag possible overrides so you know what to verify. "
-                    "This helps avoid confident-but-wrong answers when endorsements change the base policy."
-                )
-                st.json(endorsement_signals)
+    endorsement_signals = out.get("endorsement_signals")
+    if isinstance(endorsement_signals, dict) and endorsement_signals.get("present"):
+        with st.expander("Endorsement override check", expanded=False):
+            st.caption("When endorsements are retrieved, treat them as potential overrides and verify the exact wording.")
+            st.json(endorsement_signals)
 
-        # ---------- SOURCE TRANSPARENCY ----------
-        st.subheader("Sources used (snippets)")
-        show_unredacted = st.checkbox("Show unredacted snippets (local only)", value=False)
-        if raw_results:
-            rows = []
-            for r in raw_results:
-                rows.append(
-                    {
-                        "file": r.get("file_name"),
-                        "type": r.get("doc_type"),
-                        "page": r.get("page_number"),
-                        "chunk": r.get("chunk_index"),
-                        "score": (round(float(r["score"]), 3) if isinstance(r.get("score"), (int, float)) else None),
-                    }
-                )
-
-            st.dataframe(rows, use_container_width=True, hide_index=True)
-
-            with st.expander("View snippets", expanded=False):
-                for i, r in enumerate(raw_results, start=1):
-                    file_name = r.get("file_name") or "(unknown file)"
-                    doc_type = r.get("doc_type") or "(unknown type)"
-                    page = r.get("page_number")
-                    chunk = r.get("chunk_index")
-                    header = f"{i}. {file_name} | {doc_type}"
-                    if page is not None:
-                        header += f" | p. {page}"
-                    if chunk is not None:
-                        header += f" | chunk {chunk}"
-                    st.markdown(f"**{header}**")
-                    st.caption("Snippet")
-                    snippet = (r.get("snippet") or "").strip()
-                    st.write(snippet if show_unredacted else _redact_display_text(snippet) or "(empty)")
-                    st.divider()
-        else:
-            st.code(sources)
-
-    # ---------- HANDOFF / ESCALATION ----------
-    if not blocked:
-        st.subheader("Handoff to human agent")
-        st.caption("Useful for compliance: share a structured summary with citations for a human reviewer.")
-
-        col_h1, col_h2, col_h3 = st.columns([1, 1, 1])
-        with col_h1:
-            create_ticket = st.button("Create handoff ticket (MCP)")
-        with col_h2:
-            show_ticket = st.checkbox("Show last ticket", value=True)
-        with col_h3:
-            list_tickets = st.button("List tickets")
-
-        sanitized_matches = _sanitize_retrieved_matches_for_audit(raw_results)
-
-        if create_ticket:
-            try:
-                payload = _run(
-                    mcp_client.create_handoff_ticket(
-                        question=question,
-                        state=state,
-                        answer=answer,
-                        sources=sources,
-                        run_id=run_id,
-                        retrieved_matches=sanitized_matches,
-                        notes="Includes citations and redacted snippet previews only.",
-                    )
-                )
-                st.session_state["last_handoff_ticket"] = payload
-                ticket_id = (payload or {}).get("ticket_id")
-                if ticket_id:
-                    st.success(f"Created ticket {ticket_id}")
-                else:
-                    st.success("Created ticket")
-            except Exception as e:
-                st.error(f"Ticket creation failed: {e}")
-
-        if list_tickets:
-            try:
-                st.session_state["handoff_tickets"] = _run(mcp_client.list_handoff_tickets(limit=20))
-            except Exception as e:
-                st.error(f"List tickets failed: {e}")
-
-        if show_ticket and st.session_state.get("last_handoff_ticket"):
-            t = st.session_state.get("last_handoff_ticket")
-            st.json(t)
-            st.download_button(
-                "Download last handoff ticket (JSON)",
-                data=json.dumps(t, indent=2, ensure_ascii=False),
-                file_name=f"handoff_ticket_{(t or {}).get('ticket_id') or (run_id or 'run')}.json",
-                mime="application/json",
+    st.subheader("Sources used (snippets)")
+    show_unredacted = st.checkbox("Show unredacted snippets (local only)", value=False)
+    if raw_results:
+        rows = []
+        for r in raw_results:
+            rows.append(
+                {
+                    "file": r.get("file_name"),
+                    "type": r.get("doc_type"),
+                    "page": r.get("page_number"),
+                    "chunk": r.get("chunk_index"),
+                    "score": (round(float(r["score"]), 3) if isinstance(r.get("score"), (int, float)) else None),
+                }
             )
 
-        if st.session_state.get("handoff_tickets"):
-            with st.expander("Recent tickets", expanded=False):
-                st.json(st.session_state.get("handoff_tickets"))
+        st.dataframe(rows, use_container_width=True, hide_index=True)
 
-    # ---------- AUDIT TRAIL ----------
+        with st.expander("View snippets", expanded=False):
+            for i, r in enumerate(raw_results, start=1):
+                file_name = r.get("file_name") or "(unknown file)"
+                doc_type = r.get("doc_type") or "(unknown type)"
+                page = r.get("page_number")
+                chunk = r.get("chunk_index")
+                header = f"{i}. {file_name} | {doc_type}"
+                if page is not None:
+                    header += f" | p. {page}"
+                if chunk is not None:
+                    header += f" | chunk {chunk}"
+                st.markdown(f"**{header}**")
+                st.caption("Snippet")
+                snippet = (r.get("snippet") or "").strip()
+                st.write(snippet if show_unredacted else _redact_display_text(snippet) or "(empty)")
+                st.divider()
+    else:
+        st.code(sources)
+
+    st.subheader("Handoff to human agent")
+    st.caption("Share a structured summary with citations for a human reviewer.")
+
+    col_h1, col_h2, col_h3 = st.columns([1, 1, 1])
+    with col_h1:
+        create_ticket = st.button("Create handoff ticket (MCP)")
+    with col_h2:
+        show_ticket = st.checkbox("Show last ticket", value=True)
+    with col_h3:
+        list_tickets = st.button("List tickets")
+
+    sanitized_matches = _sanitize_retrieved_matches_for_audit(raw_results)
+
+    if create_ticket:
+        try:
+            payload = _run(
+                mcp_client.create_handoff_ticket(
+                    question=question,
+                    state=state,
+                    answer=answer,
+                    sources=sources,
+                    run_id=run_id,
+                    retrieved_matches=sanitized_matches,
+                    notes="Includes citations and redacted snippet previews only.",
+                )
+            )
+            st.session_state["last_handoff_ticket"] = payload
+            ticket_id = (payload or {}).get("ticket_id")
+            if ticket_id:
+                st.success(f"Created ticket {ticket_id}")
+            else:
+                st.success("Created ticket")
+        except Exception as e:
+            st.error(f"Ticket creation failed: {e}")
+
+    if list_tickets:
+        try:
+            st.session_state["handoff_tickets"] = _run(mcp_client.list_handoff_tickets(limit=20))
+        except Exception as e:
+            st.error(f"List tickets failed: {e}")
+
+    if show_ticket and st.session_state.get("last_handoff_ticket"):
+        t = st.session_state.get("last_handoff_ticket")
+        st.json(t)
+        st.download_button(
+            "Download last handoff ticket (JSON)",
+            data=json.dumps(t, indent=2, ensure_ascii=False),
+            file_name=f"handoff_ticket_{(t or {}).get('ticket_id') or (run_id or 'run')}.json",
+            mime="application/json",
+        )
+
+    if st.session_state.get("handoff_tickets"):
+        with st.expander("Recent tickets", expanded=False):
+            st.json(st.session_state.get("handoff_tickets"))
+
     with st.expander("Audit trail", expanded=True):
         st.caption(
             "This log is for audit and troubleshooting. It does not store full prompts, and it redacts common PII patterns in text previews."
@@ -777,6 +811,33 @@ if ask:
             file_name=f"audit_trace_{run_id or 'run'}.json",
             mime="application/json",
         )
+
+
+run_requested = bool(ask or st.session_state.pop("retry_requested", False))
+if run_requested:
+    st.session_state["last_inputs"] = {
+        "question": question,
+        "state": state,
+        "require_citations": bool(require_citations),
+    }
+
+    with st.spinner("Retrieving policy clauses (MCP) + generating answer..."):
+        st.session_state["last_out"] = _run_graph_once(
+            question=question,
+            state=state,
+            require_citations=bool(require_citations),
+        )
+
+last_out = st.session_state.get("last_out")
+last_inputs = st.session_state.get("last_inputs")
+if isinstance(last_out, dict) and isinstance(last_inputs, dict):
+    _render_run(
+        out=last_out,
+        question=str(last_inputs.get("question") or ""),
+        state=str(last_inputs.get("state") or ""),
+        require_citations=bool(last_inputs.get("require_citations", True)),
+        status_payload=status_payload,
+    )
 
 
 with st.expander("Ingestion / indexing results", expanded=False):

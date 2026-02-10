@@ -31,6 +31,12 @@ convert_doc() {
     --from gfm \
     --toc \
     --standalone \
+    -o "$OUT_DIR/${out_base}.html"
+
+  pandoc "$in_path" \
+    --from gfm \
+    --toc \
+    --standalone \
     -o "$OUT_DIR/${out_base}.docx"
 
   if command -v wkhtmltopdf >/dev/null 2>&1; then

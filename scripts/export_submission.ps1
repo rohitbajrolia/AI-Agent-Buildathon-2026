@@ -22,6 +22,9 @@ function Convert-Doc([string]$InFile, [string]$OutBase) {
 
   Write-Host "Exporting: $InFile"
 
+  $HtmlPath = Join-Path $OutDir ($OutBase + '.html')
+  pandoc $InPath --from gfm --toc --standalone -o $HtmlPath
+
   $DocxPath = Join-Path $OutDir ($OutBase + '.docx')
   pandoc $InPath --from gfm --toc --standalone -o $DocxPath
 
