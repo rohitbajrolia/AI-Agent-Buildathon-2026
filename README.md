@@ -67,3 +67,15 @@ bash ./stop_demo.sh
 - Overall diagrams and flows: `ARCHITECTURE.md`
 - Server setup + Qdrant notes: `home-insurance-mcp/README.md`
 - Client UI + demo steps: `home-insurance-mcp-client/README.md`
+
+## Project brief and narrative
+
+- One-page brief: `PROJECT_BRIEF.md`
+- Proposal doc: `BUILDATHON_SUBMISSION.md`
+- 90-second pitch: `PITCH_90_SECONDS.md`
+
+## Impact (pilot targets)
+
+- Reduce policy clause lookup time from 12 minutes to 7 minutes (≈42% reduction)
+- Improve first-contact resolution by 10–15% for common coverage questions
+- Reduce escalations by 5–10% by making evidence and “what to verify” explicit

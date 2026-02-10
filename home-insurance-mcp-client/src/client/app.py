@@ -19,6 +19,18 @@ from client import mcp_client
 
 st.set_page_config(page_title="Home Insurance Coverage Concierge", layout="wide")
 
+
+def _apply_ui_theme() -> None:
+    try:
+        css_path = Path(__file__).with_name("ui_theme.css")
+        if css_path.exists():
+            st.markdown(f"<style>{css_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
+    except Exception:
+        return
+
+
+_apply_ui_theme()
+
 # ---------- ALWAYS-VISIBLE COMPLIANCE HEADER ----------
 st.title("Coverage Concierge (Policy-Grounded)")
 st.warning(
