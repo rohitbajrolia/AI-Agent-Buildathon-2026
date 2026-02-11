@@ -155,7 +155,8 @@ def _evidence_strength_from_validation(validation: dict | None) -> tuple[str, st
     if not isinstance(validation, dict):
         return ("Unknown", "info", ["No validation stats"])
 
-    stats = validation.get("stats") if isinstance(validation.get("stats"), dict) else {}
+    stats_obj = validation.get("stats")
+    stats: dict = stats_obj if isinstance(stats_obj, dict) else {}
     result_count = stats.get("result_count")
     unique_files = stats.get("unique_files")
     unique_doc_types = stats.get("unique_doc_types")
