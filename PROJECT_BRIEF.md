@@ -4,7 +4,7 @@
 Homeowners policy packets are long and fragmented (policy booklet, declarations, endorsements, change notices). Teams repeatedly answer the same coverage questions while manually searching PDFs, reconciling endorsements, and explaining conditions and exclusions. This increases handle time, creates inconsistent guidance across agents, and raises risk when an answer is given without strong policy evidence.
 
 ## 2) Proposed solution
-A policy-grounded assistant that answers coverage questions using only retrieved policy evidence. It uses tool-driven retrieval (MCP), an explicit validation step that can block unsafe answers, and citation verification so outputs remain defensible.
+Coverage Concierge is a system for answering coverage questions from policy content. It retrieves evidence, applies an explicit decision path, declines low-confidence questions, verifies citations, and produces defensible outputs grounded in the policy packet.
 
 ## 3) Workflow (step-by-step)
 1. Start Qdrant (vector store).
@@ -18,10 +18,10 @@ A policy-grounded assistant that answers coverage questions using only retrieved
 
 ## 4) Architecture (components)
 - UI: Streamlit app (operator controls, status, results, audit export).
-- Agent workflow: LangGraph state machine.
+- Workflow engine: LangGraph state machine.
 - Tool layer: MCP server (Streamable HTTP) exposing ingest/index/retrieve/status tools.
 - Vector store: Qdrant (Docker, persistent volume).
-- LLM provider: OpenAI (embeddings + answer generation).
+- Text and embedding service: OpenAI (embeddings + response generation).
 
 See the end-to-end diagram and tool list in ARCHITECTURE.md.
 
@@ -38,7 +38,7 @@ See the end-to-end diagram and tool list in ARCHITECTURE.md.
 Pilot assumptions:
 - Common coverage questions handled by a service team.
 - Policy packet is indexed for the customer/product.
-- The assistant is used for first-pass guidance with citations; humans retain final decision authority.
+- The workflow is used for first-pass guidance with citations; humans retain final decision authority.
 
 Target outcomes (example):
 - Reduce policy lookup / clause-finding time from 12 minutes to 7 minutes (~42% reduction).

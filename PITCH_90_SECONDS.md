@@ -2,7 +2,7 @@
 
 Insurance policy packets are long and fragmented - booklet, endorsements, declarations - and teams repeatedly answer the same coverage questions. Today that means agents waste time searching PDFs, answers vary by who handles the call, and there's real risk if guidance is given without strong policy evidence.
 
-Coverage Concierge is a policy-grounded assistant that answers coverage questions with citations from the customer's policy packet.
+Coverage Concierge is an evidence-backed workflow that answers coverage questions with citations from the customer's policy packet.
 
 It's deliberately tool-driven:
 - Ingest and index the policy PDFs locally.

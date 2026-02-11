@@ -10,8 +10,23 @@ function Require-Cmd([string]$Name) {
   }
 }
 
-Require-Cmd pandoc
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+
+$Pandoc = Get-Command pandoc -ErrorAction SilentlyContinue
+if (-not $Pandoc) {
+  Write-Host "pandoc not found; using local exporter (no external deps)."
+
+  $Py = Join-Path $RootDir '.venv\Scripts\python.exe'
+  if (-not (Test-Path $Py)) {
+    $Py = 'python'
+  }
+
+  & $Py (Join-Path $RootDir 'scripts\export_submission_local.py')
+
+  Write-Host ""
+  Write-Host "Done. Outputs are in: $OutDir"
+  return
+}
 
 function Convert-Doc([string]$InFile, [string]$OutBase) {
   $InPath = Join-Path $RootDir $InFile
@@ -41,7 +56,7 @@ function Convert-Doc([string]$InFile, [string]$OutBase) {
 
 Convert-Doc 'BUILDATHON_SUBMISSION.md' 'Coverage_Concierge_Proposal'
 Convert-Doc 'PROJECT_BRIEF.md' 'Coverage_Concierge_Project_Brief'
-Convert-Doc 'PITCH_90_SECONDS.md' 'Coverage_Concierge_Pitch_90s'
+Convert-Doc 'PITCH_90_SECONDS.md' 'Coverage_Concierge_90_Second_Pitch'
 
 Write-Host ""
 Write-Host "Done. Outputs are in: $OutDir"

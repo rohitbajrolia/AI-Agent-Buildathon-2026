@@ -7,12 +7,22 @@ OUT_DIR="$ROOT_DIR/dist"
 require_cmd() {
   local name="$1"
   if ! command -v "$name" >/dev/null 2>&1; then
-    echo "Missing dependency: $name" >&2
     return 1
   fi
 }
 
-require_cmd pandoc
+if ! require_cmd pandoc; then
+  echo "pandoc not found; using local exporter (no external deps)." >&2
+  if [[ -x "$ROOT_DIR/.venv/Scripts/python.exe" ]]; then
+    "$ROOT_DIR/.venv/Scripts/python.exe" "$ROOT_DIR/scripts/export_submission_local.py"
+  else
+    python "$ROOT_DIR/scripts/export_submission_local.py"
+  fi
+  echo
+  echo "Done. Outputs are in: $OUT_DIR"
+  exit 0
+fi
+
 mkdir -p "$OUT_DIR"
 
 convert_doc() {
@@ -51,7 +61,7 @@ convert_doc() {
 
 convert_doc "BUILDATHON_SUBMISSION.md" "Coverage_Concierge_Proposal"
 convert_doc "PROJECT_BRIEF.md" "Coverage_Concierge_Project_Brief"
-convert_doc "PITCH_90_SECONDS.md" "Coverage_Concierge_Pitch_90s"
+convert_doc "PITCH_90_SECONDS.md" "Coverage_Concierge_90_Second_Pitch"
 
 echo
 

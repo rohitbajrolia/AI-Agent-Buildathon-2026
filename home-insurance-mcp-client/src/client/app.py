@@ -151,6 +151,72 @@ def _sanitize_retrieved_matches_for_audit(raw_results: list[dict]) -> list[dict]
     return sanitized
 
 
+def _evidence_strength_from_validation(validation: dict | None) -> tuple[str, str, list[str]]:
+    if not isinstance(validation, dict):
+        return ("Unknown", "info", ["No validation stats"])
+
+    stats = validation.get("stats") if isinstance(validation.get("stats"), dict) else {}
+    result_count = stats.get("result_count")
+    unique_files = stats.get("unique_files")
+    unique_doc_types = stats.get("unique_doc_types")
+    max_score = stats.get("max_score")
+
+    rc = int(result_count) if isinstance(result_count, (int, float)) else None
+    uf = int(unique_files) if isinstance(unique_files, (int, float)) else None
+    ud = int(unique_doc_types) if isinstance(unique_doc_types, (int, float)) else None
+    score = float(max_score) if isinstance(max_score, (int, float)) else None
+
+    reasons: list[str] = []
+    if score is not None:
+        reasons.append(f"Top relevance {score:.2f}")
+    if rc is not None:
+        reasons.append(f"Matches {rc}")
+    if uf is not None:
+        reasons.append(f"Files {uf}")
+    if ud is not None:
+        reasons.append(f"Doc types {ud}")
+
+    if rc == 0 or (score is not None and score < 0.10):
+        return ("Weak", "error", reasons)
+    if (score is not None and score < 0.25) or (uf is not None and uf < 2) or (ud is not None and ud < 2):
+        return ("Medium", "warning", reasons)
+    if score is None and rc is None:
+        return ("Unknown", "info", reasons)
+    return ("Strong", "success", reasons)
+
+
+def _render_evidence_strength(label: str, kind: str, reasons: list[str]) -> None:
+    msg = f"Evidence strength: {label}"
+    if kind == "success":
+        st.success(msg)
+    elif kind == "warning":
+        st.warning(msg)
+    elif kind == "error":
+        st.error(msg)
+    else:
+        st.info(msg)
+    if reasons:
+        st.caption("Signals: " + " | ".join(reasons))
+
+
+def _render_run_summary(*, validation: dict | None, run_seconds: float | None) -> None:
+    stats = validation.get("stats") if isinstance(validation, dict) else {}
+    if not isinstance(stats, dict):
+        stats = {}
+
+    run_time = f"{run_seconds:.1f}s" if isinstance(run_seconds, (int, float)) else "—"
+    match_count = stats.get("result_count") or "—"
+    file_count = stats.get("unique_files") or "—"
+
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        st.metric("Run time", run_time)
+    with col_b:
+        st.metric("Matches", match_count)
+    with col_c:
+        st.metric("Files", file_count)
+
+
 def _render_next_steps(*, status_payload: dict | None) -> None:
     steps: list[str] = []
 
@@ -339,6 +405,106 @@ with st.sidebar:
                 st.json(payload)
         except Exception as e:
             st.error(f"Health check failed: {e}")
+
+    with st.expander("Self-check (quick)", expanded=False):
+        st.caption("Runs in order: health -> index status -> retrieve sample")
+
+        if "self_check_query" not in st.session_state:
+            st.session_state["self_check_query"] = "water damage coverage"
+
+        self_check_query = st.text_input(
+            "Sample retrieve query",
+            key="self_check_query",
+            help="Use a generic phrase. Avoid personal or claim-specific info.",
+        )
+
+        run_self_check = st.button("Run self-check")
+
+        if run_self_check:
+            result: dict = {
+                "ran_unix": int(time.time()),
+                "health": None,
+                "index_status": None,
+                "retrieve": None,
+                "errors": [],
+            }
+
+            # 1) Health
+            try:
+                result["health"] = _run(mcp_client.health())
+            except Exception as e:
+                result["errors"].append(f"health: {e}")
+
+            # 2) Index status
+            try:
+                result["index_status"] = _run(mcp_client.index_status())
+            except Exception as e:
+                result["errors"].append(f"index_status: {e}")
+
+            # 3) Retrieve (only if index looks ready)
+            try:
+                status_payload = result.get("index_status") or {}
+                ready = bool(
+                    status_payload
+                    and status_payload.get("status") == "ok"
+                    and status_payload.get("collection_exists")
+                    and (
+                        status_payload.get("points_count") is None
+                        or (status_payload.get("points_count") or 0) > 0
+                    )
+                )
+                if ready:
+                    result["retrieve"] = _run(mcp_client.retrieve_clauses(query=str(self_check_query), top_k=2))
+                else:
+                    result["retrieve"] = {"skipped": True, "reason": "Index not ready"}
+            except Exception as e:
+                result["errors"].append(f"retrieve_clauses: {e}")
+
+            st.session_state["self_check_result"] = result
+
+        sc = st.session_state.get("self_check_result")
+        if isinstance(sc, dict):
+            health_ok = bool((sc.get("health") or {}).get("status") == "ok")
+            idx = sc.get("index_status") or {}
+            idx_ok = bool(idx.get("status") == "ok")
+            idx_ready = bool(
+                idx_ok
+                and idx.get("collection_exists")
+                and (idx.get("points_count") is None or (idx.get("points_count") or 0) > 0)
+            )
+
+            st.write(f"1) Health: {'OK' if health_ok else 'Not OK'}")
+            st.write(f"2) Index status: {'OK' if idx_ok else 'Not OK'}")
+            st.write(f"3) Index ready: {'Yes' if idx_ready else 'No'}")
+
+            r = sc.get("retrieve")
+            if isinstance(r, dict) and r.get("skipped"):
+                st.info("Retrieve skipped (index not ready)")
+            elif isinstance(r, dict):
+                results = r.get("results") or []
+                if results:
+                    st.success(f"Retrieve: OK ({len(results)} matches)")
+                    first = results[0]
+                    st.caption("First match (redacted preview)")
+                    st.json(
+                        {
+                            "file_name": first.get("file_name"),
+                            "doc_type": first.get("doc_type"),
+                            "page_number": first.get("page_number"),
+                            "score": first.get("score"),
+                            "snippet_redacted": _redact_display_text(first.get("snippet") or ""),
+                        }
+                    )
+                else:
+                    st.warning("Retrieve returned 0 matches")
+
+            errs = sc.get("errors") or []
+            if errs:
+                st.error("Self-check errors")
+                st.code("\n".join(str(e) for e in errs))
+
+            with st.expander("Self-check details", expanded=False):
+                st.json(sc)
 
     if do_ingest:
         try:
@@ -629,6 +795,12 @@ def _render_run(*, out: dict, question: str, state: str, require_citations: bool
     st.session_state["last_trace"] = trace
     st.session_state["last_run_id"] = run_id
 
+    strength_label, strength_kind, strength_reasons = _evidence_strength_from_validation(
+        validation if isinstance(validation, dict) else None
+    )
+    _render_evidence_strength(strength_label, strength_kind, strength_reasons)
+    _render_run_summary(validation=validation if isinstance(validation, dict) else None, run_seconds=st.session_state.get("last_run_seconds"))
+
     top_a, top_b, top_c = st.columns([1, 1, 3])
     with top_a:
         if st.button("Retry", key=f"retry_{run_id or 'run'}"):
@@ -785,7 +957,7 @@ def _render_run(*, out: dict, question: str, state: str, require_citations: bool
 
     with st.expander("Audit trail", expanded=True):
         st.caption(
-            "This log is for audit and troubleshooting. It does not store full prompts, and it redacts common PII patterns in text previews."
+            "This log is for audit and troubleshooting. It does not store full inputs, and it redacts common PII patterns in text previews."
         )
 
         sanitized_matches = _sanitize_retrieved_matches_for_audit(raw_results)
@@ -821,12 +993,14 @@ if run_requested:
         "require_citations": bool(require_citations),
     }
 
+    run_started = time.time()
     with st.spinner("Retrieving policy clauses (MCP) + generating answer..."):
         st.session_state["last_out"] = _run_graph_once(
             question=question,
             state=state,
             require_citations=bool(require_citations),
         )
+    st.session_state["last_run_seconds"] = time.time() - run_started
 
 last_out = st.session_state.get("last_out")
 last_inputs = st.session_state.get("last_inputs")

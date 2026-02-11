@@ -42,6 +42,6 @@ SOURCES (snippets from policy documents):
 Citations required: {require_citations}
 
 Instruction:
-Write the response using the exact output format from the system message.
+Write the response using the exact output format defined above.
 If citations are required and the SOURCES are weak or missing, be explicit about what you cannot confirm.
 """

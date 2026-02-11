@@ -1,14 +1,14 @@
 # Home Insurance MCP - Architecture and Flow
 
 **Purpose**
-This project is a local, policy-grounded Q&A workflow for homeowners insurance. It combines a Streamlit UI, a LangGraph pipeline, an MCP server, Qdrant (vector search), and OpenAI (embeddings + answer generation).
+This project is a local, evidence-backed Q&A workflow for homeowners insurance. It combines a Streamlit UI, a LangGraph pipeline, an MCP server, Qdrant (vector search), and OpenAI (embeddings + answer generation).
 
 **Key files to understand the application**
 - UI and user flow: `home-insurance-mcp-client/src/client/app.py:18`
 - LangGraph pipeline (retrieve -> validate -> answer -> citation_verify): `home-insurance-mcp-client/src/client/graph.py:682`
 - MCP client wrapper (tool calls): `home-insurance-mcp-client/src/client/mcp_client.py:22`
 - MCP server tools (ingest/index/retrieve/status): `home-insurance-mcp/src/server/mcp_server.py:290`
-- System prompt and answer format rules: `home-insurance-mcp-client/src/client/prompts.py:1`
+- Answer instruction template and format rules: `home-insurance-mcp-client/src/client/prompts.py:1`
 
 **High-level architecture**
 - Streamlit UI runs the LangGraph pipeline and renders results. `home-insurance-mcp-client/src/client/app.py:18`
@@ -47,7 +47,7 @@ This project is a local, policy-grounded Q&A workflow for homeowners insurance. 
 **Guardrails in code (what they protect)**
 - PII warnings + consent gate in the UI. `home-insurance-mcp-client/src/client/app.py:27` and `home-insurance-mcp-client/src/client/app.py:274`
 - Redacted audit trail and snippet display. `home-insurance-mcp-client/src/client/app.py:62` and `home-insurance-mcp-client/src/client/graph.py:40`
-- Strict citation rules in the prompt. `home-insurance-mcp-client/src/client/prompts.py:5`
+- Strict citation rules in the instruction template. `home-insurance-mcp-client/src/client/prompts.py:5`
 - Evidence-quality gating. `home-insurance-mcp-client/src/client/graph.py:585`
 - Citation verification + retry. `home-insurance-mcp-client/src/client/graph.py:460`
 - Docs root restriction on server ingest/index. `home-insurance-mcp/src/server/mcp_server.py:64`

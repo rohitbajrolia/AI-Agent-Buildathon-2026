@@ -5,6 +5,7 @@ This repo runs the MCP tool server for the application. It exposes Streamable HT
 ## What it provides
 
 - Tool API: `health`, `ingest_folder`, `index_folder_qdrant`, `retrieve_clauses`, `index_status`, `normalize_quote_snapshot`.
+- Job tools (for progress): `start_ingest_job`, `start_index_job`, `job_status`.
 - OCR fallback for scanned PDFs (Tesseract + PyMuPDF), when enabled.
 - Stable chunk IDs and metadata (file, page, chunk) for citations.
 - Docs-root restriction and error redaction for safety.
@@ -16,6 +17,8 @@ This repo runs the MCP tool server for the application. It exposes Streamable HT
 3. `index_folder_qdrant` chunks text, embeds with OpenAI, and upserts to Qdrant.
 4. `retrieve_clauses` embeds a query and returns top matches with snippets.
 5. `index_status` reports readiness (Qdrant, collection, OpenAI, OCR).
+
+For long-running operations, the client UI uses `start_ingest_job` / `start_index_job` and polls `job_status` to show progress.
 
 ## Architecture
 
