@@ -219,3 +219,47 @@ async def normalize_quote_snapshot(
             return {}
         import json
         return json.loads(text_payload)
+
+
+async def create_handoff_ticket(
+    *,
+    question: str,
+    state: str,
+    answer: str,
+    sources: str,
+    run_id: str | None = None,
+    retrieved_matches: list[dict] | None = None,
+    notes: str | None = None,
+) -> dict:
+    """Creates a lightweight handoff ticket on the server (in-memory)."""
+    async with mcp_session() as session:
+        args: dict = {
+            "question": question,
+            "state": state,
+            "answer": answer,
+            "sources": sources,
+        }
+        if run_id:
+            args["run_id"] = run_id
+        if retrieved_matches is not None:
+            args["retrieved_matches"] = retrieved_matches
+        if notes:
+            args["notes"] = notes
+
+        result = await session.call_tool("create_handoff_ticket", args)
+        text_payload = _extract_text_payload(result)
+        if not text_payload:
+            return {}
+        import json
+        return json.loads(text_payload)
+
+
+async def list_handoff_tickets(limit: int = 20) -> dict:
+    """List recent handoff tickets stored on the server."""
+    async with mcp_session() as session:
+        result = await session.call_tool("list_handoff_tickets", {"limit": int(limit)})
+        text_payload = _extract_text_payload(result)
+        if not text_payload:
+            return {"tickets": []}
+        import json
+        return json.loads(text_payload)

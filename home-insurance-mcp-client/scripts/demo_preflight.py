@@ -63,12 +63,12 @@ def main() -> int:
             print(f"- {w}")
 
     if required_failures:
-        print("\nFAIL (not demo-ready):")
+        print("\nFAIL (not ready):")
         for f in required_failures:
             print(f"- {f}")
         return 2
 
-    print("PASS (demo-ready)")
+    print("PASS (ready)")
     return 0
 
 

@@ -1,0 +1,172 @@
+:root {
+  --bg: #0e0e10;
+  --panel: #15161a;
+  --panel-2: #1b1c22;
+  --text: #f3f4f6;
+  --muted: #b6bcc7;
+  --accent: #3568ff;
+  --accent-2: #2b54d6;
+  --ok: #2dd4bf;
+  --warn: #fbbf24;
+  --err: #fb7185;
+  --border: rgba(255, 255, 255, 0.08);
+}
+
+/* App background + base typography */
+.stApp {
+  background: var(--bg);
+  color: var(--text);
+}
+
+html, body, [class*="css"] {
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+html { font-size: 12px; }
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+  border-right: 1px solid var(--border);
+}
+
+/* Headings */
+h1, h2, h3 {
+  letter-spacing: 0.2px;
+}
+
+a {
+  color: rgba(53, 104, 255, 0.95);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+hr {
+  border-color: var(--border);
+}
+
+/* Inputs */
+div[data-baseweb="input"] input,
+div[data-baseweb="textarea"] textarea {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+  border-radius: 10px !important;
+}
+
+/* Buttons */
+.stButton > button {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+
+.stButton > button:hover {
+  border-color: rgba(53, 104, 255, 0.45);
+  background: rgba(53, 104, 255, 0.12);
+}
+
+/* Primary button */
+button[kind="primary"] {
+  background: var(--accent) !important;
+  border: 1px solid rgba(53, 104, 255, 0.9) !important;
+  color: white !important;
+}
+
+button[kind="primary"]:hover {
+  background: var(--accent-2) !important;
+}
+
+/* Expanders */
+details {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 6px 10px;
+}
+
+details > summary {
+  color: var(--text);
+  font-weight: 600;
+}
+
+details > summary:hover {
+  color: rgba(53, 104, 255, 0.95);
+}
+
+/* Code blocks */
+code {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px 6px;
+  color: var(--text);
+}
+
+pre {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+}
+
+/* Dataframe container */
+div[data-testid="stDataFrame"] {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* Metric cards */
+div[data-testid="stMetric"] {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+div[data-testid="stMetric"] label {
+  color: var(--muted) !important;
+}
+
+/* Progress bars */
+div[data-testid="stProgress"] {
+  background: transparent;
+}
+
+div[data-testid="stProgress"] > div {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+div[data-testid="stProgress"] > div > div > div {
+  background-color: var(--accent) !important;
+}
+
+/* Caption + help text */
+.stCaption, .stMarkdown small {
+  color: var(--muted);
+}
+
+/* Alerts (success/warning/error) */
+div[data-testid="stAlert"] {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+div[data-testid="stAlert"] p {
+  color: var(--text);
+}
+
+/* Remove Streamlit chrome */
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+
+header[data-testid="stHeader"] {
+  background: rgba(14, 14, 16, 0.85);
+  border-bottom: 1px solid var(--border);
+}
