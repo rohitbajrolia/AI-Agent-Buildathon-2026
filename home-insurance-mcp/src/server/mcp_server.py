@@ -56,11 +56,66 @@ qdrant = QdrantClient(url=QDRANT_URL, check_compatibility=False)
 
 # -----------------------------
 # Simple in-memory job tracker
-# (start job → poll status)
+# (start job -> poll status)
 # -----------------------------
 
 _JOBS: dict[str, dict] = {}
 _JOBS_LOCK = threading.Lock()
+
+_TICKETS: dict[str, dict] = {}
+_TICKETS_LOCK = threading.Lock()
+
+_DEMO_STATE_DIR = (Path(__file__).resolve().parents[3] / ".demo_state").resolve()
+_TICKETS_STORE_PATH = Path(os.getenv("MCP_TICKETS_STORE", str(_DEMO_STATE_DIR / "handoff_tickets.jsonl"))).resolve()
+
+
+def _tickets_store_append(record: dict) -> None:
+    try:
+        _TICKETS_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _TICKETS_STORE_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        # Persistence is best-effort; if disk write fails, we still keep going.
+        return
+
+
+def _tickets_store_load() -> None:
+    if not _TICKETS_STORE_PATH.exists():
+        return
+    try:
+        with _TICKETS_STORE_PATH.open("r", encoding="utf-8") as f:
+            for line in f:
+                raw = (line or "").strip()
+                if not raw:
+                    continue
+                rec = json.loads(raw)
+                tid = rec.get("ticket_id")
+                if not tid:
+                    continue
+                with _TICKETS_LOCK:
+                    _TICKETS[str(tid)] = rec
+    except Exception:
+        return
+
+
+def _ticket_create(*, payload: dict) -> dict:
+    ticket_id = str(uuid.uuid4())
+    record = {
+        "ticket_id": ticket_id,
+        "created_unix": int(time.time()),
+        "payload": payload,
+    }
+    with _TICKETS_LOCK:
+        _TICKETS[ticket_id] = record
+    _tickets_store_append(record)
+    return record
+
+
+def _ticket_list(*, limit: int = 20) -> list[dict]:
+    with _TICKETS_LOCK:
+        items = list(_TICKETS.values())
+    items.sort(key=lambda r: int(r.get("created_unix") or 0), reverse=True)
+    return items[: max(1, min(int(limit), 100))]
 
 
 def _job_create(*, kind: str, params: dict) -> str:
@@ -596,6 +651,48 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         }
         return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
 
+    if name == "create_handoff_ticket":
+        question = (arguments.get("question") or "").strip()
+        state = (arguments.get("state") or "").strip()
+        answer = (arguments.get("answer") or "").strip()
+        sources = (arguments.get("sources") or "").strip()
+        run_id = (arguments.get("run_id") or "").strip() or None
+        retrieved_matches = arguments.get("retrieved_matches")
+        notes = (arguments.get("notes") or "").strip() or None
+
+        if not question:
+            raise ValueError("question is required")
+        if not state:
+            raise ValueError("state is required")
+        if not answer:
+            raise ValueError("answer is required")
+
+        def _truncate(s: str, n: int) -> str:
+            return s if len(s) <= n else (s[:n] + "...")
+
+        record = _ticket_create(
+            payload={
+                "kind": "handoff_ticket",
+                "run_id": run_id,
+                "question": _truncate(question, 2000),
+                "state": state,
+                "answer": _truncate(answer, 8000),
+                "sources": _truncate(sources, 12000),
+                "retrieved_matches": retrieved_matches if isinstance(retrieved_matches, list) else None,
+                "notes": notes,
+            }
+        )
+        return [types.TextContent(type="text", text=json.dumps(record, indent=2))]
+
+    if name == "list_handoff_tickets":
+        limit = int(arguments.get("limit") or 20)
+        tickets = _ticket_list(limit=limit)
+        payload = {
+            "count": len(tickets),
+            "tickets": tickets,
+        }
+        return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
+
     if name == "start_ingest_job":
         folder_path = _resolve_docs_folder(arguments["folder_path"])
         max_pages = int(arguments.get("max_pages", 25))
@@ -978,7 +1075,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="normalize_quote_snapshot",
-            description="Normalize key values from a quote/rating snapshot (for deductible what-if demos).",
+            description="Normalize key values from a quote/rating snapshot (for deductible what-if scenarios).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1043,6 +1140,38 @@ async def list_tools() -> list[types.Tool]:
             description="Report Qdrant connectivity and whether the document index collection exists (plus point count when available).",
             inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
         ),
+
+        types.Tool(
+            name="create_handoff_ticket",
+            description="Create a lightweight handoff ticket (in-memory) containing question, answer, and citations for human review.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "state": {"type": "string", "description": "State / jurisdiction context."},
+                    "answer": {"type": "string", "description": "Final grounded answer shown to the user (with citations)."},
+                    "sources": {"type": "string", "description": "SOURCES block used to generate the answer."},
+                    "run_id": {"type": "string", "description": "Optional client run id for trace correlation."},
+                    "retrieved_matches": {"type": "array", "description": "Optional redacted retrieved match summaries."},
+                    "notes": {"type": "string", "description": "Optional notes (e.g., safety constraints)."},
+                },
+                "required": ["question", "state", "answer", "sources"],
+                "additionalProperties": False,
+            },
+        ),
+
+        types.Tool(
+            name="list_handoff_tickets",
+            description="List recent handoff tickets created in this server session (session-only).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 20, "description": "Max tickets to return."},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        ),
     ]
 
 
@@ -1065,6 +1194,7 @@ async def handle_streamable_http(scope: Scope, receive: Receive, send: Send) -> 
 async def lifespan(starlette_app: Starlette) -> AsyncIterator[None]:
     async with session_manager.run():
         print("MCP StreamableHTTP session manager started")
+        _tickets_store_load()
         try:
             yield
         finally:

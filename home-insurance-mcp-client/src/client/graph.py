@@ -31,6 +31,70 @@ class GraphState(TypedDict):
     blocked: NotRequired[bool]
     validation: NotRequired[dict[str, Any]]
     answer_retry_count: NotRequired[int]
+    endorsement_signals: NotRequired[dict[str, Any]]
+
+
+_ENDORSEMENT_MODIFY_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\bthis endorsement\b", flags=re.IGNORECASE),
+    re.compile(r"\bchanges? the policy\b", flags=re.IGNORECASE),
+    re.compile(r"\bamend(s|ed)?\b", flags=re.IGNORECASE),
+    re.compile(r"\bmodif(y|ies|ied)\b", flags=re.IGNORECASE),
+    re.compile(r"\breplace(s|d)?\b", flags=re.IGNORECASE),
+    re.compile(r"\bdeleted and replaced\b", flags=re.IGNORECASE),
+    re.compile(r"\bsupersede(s|d)?\b", flags=re.IGNORECASE),
+]
+
+
+def _detect_endorsement_conflicts(raw_results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Detect simple, defensible 'endorsement may override base policy' signals.
+
+    We do NOT try to fully interpret endorsements (that would be guessing).
+    We only surface: (1) endorsements were retrieved, (2) they include language that
+    suggests modification, and (3) we should prefer endorsement language when conflicts exist.
+    """
+    results = raw_results or []
+
+    endorsements: list[dict[str, Any]] = []
+    base_docs: list[dict[str, Any]] = []
+    for r in results:
+        doc_type = (r.get("doc_type") or "").strip().lower()
+        if doc_type == "endorsement":
+            endorsements.append(r)
+        else:
+            base_docs.append(r)
+
+    if not endorsements:
+        return {"present": False}
+
+    signals: list[dict[str, Any]] = []
+    for r in endorsements:
+        snippet = (r.get("snippet") or "").strip()
+        matched = []
+        for p in _ENDORSEMENT_MODIFY_PATTERNS:
+            if p.search(snippet):
+                matched.append(p.pattern)
+        if matched:
+            signals.append(
+                {
+                    "file_name": r.get("file_name"),
+                    "page_number": r.get("page_number"),
+                    "chunk_index": r.get("chunk_index"),
+                    "matched": matched,
+                }
+            )
+
+    return {
+        "present": True,
+        "endorsement_matches": len(endorsements),
+        "base_matches": len(base_docs),
+        "modification_language_found": bool(signals),
+        "signals": signals,
+        "guidance": (
+            "Endorsements can modify or override base policy language. "
+            "If endorsement text conflicts with the booklet/declarations, treat the endorsement as controlling "
+            "and ask a human to confirm applicability (form, effective date, property/state)."
+        ),
+    }
 
 
 def _now_iso_utc() -> str:
@@ -40,9 +104,8 @@ def _now_iso_utc() -> str:
 def _redact_text(text: str, *, max_preview_chars: int = 180) -> dict[str, Any]:
     """Create a trace-safe summary of user-provided text.
 
-    The audit trail should be useful without becoming a PII repository.
-    The stored trace avoids sensitive personal data by keeping a short preview
-    (with light redaction), plus length and a hash.
+    The audit log should be useful without turning into a PII dump.
+    We keep a short preview (lightly redacted), plus length and a hash.
     """
     cleaned = (text or "").strip()
 
@@ -68,7 +131,7 @@ def _redact_text(text: str, *, max_preview_chars: int = 180) -> dict[str, Any]:
 
     redacted_text = "".join(redacted)
 
-    # Naive email masking (good enough for audit preview).
+    # Simple email masking for audit preview.
     if "@" in redacted_text and "." in redacted_text:
         parts = redacted_text.split()
         masked_parts = []
@@ -123,9 +186,9 @@ def retrieve_node(state: GraphState) -> GraphState:
         else:
             cite = f'[{r.get("file_name")} | {r.get("doc_type")} | chunk {r.get("chunk_index")}]'
         snippet = (r.get("snippet") or "").replace("\n", " ").strip()
-        # Keep prompts tight; long snippets increase latency without improving citations.
+        # Keep prompts tight; long snippets add latency without helping citations.
         if len(snippet) > 360:
-            snippet = snippet[:360].rstrip() + "…"
+            snippet = snippet[:360].rstrip() + "..."
         lines.append(f"- {cite} {snippet}")
 
     state["sources"] = "\n".join(lines) if lines else "(no sources found)"
@@ -173,7 +236,7 @@ def answer_node(state: GraphState) -> GraphState:
     Node 2: Ask the model to answer using ONLY the retrieved sources.
     """
     question = state["question"]
-    state_code = state.get("state", "IL")  # clarity: Its a state code for jurisdiction  
+    state_code = state.get("state", "IL")  # State code for jurisdiction.
     sources = state.get("sources") or "(no sources found)"
     require_citations = state.get("require_citations", True)
 
@@ -206,9 +269,22 @@ def answer_node(state: GraphState) -> GraphState:
         require_citations=require_citations,
     )
 
+    # Endorsement check: if endorsements show up, flag possible overrides.
+    # This part was a pain to get right; keep it simple and explicit.
+    raw_results = state.get("raw_results", []) or []
+    endorsement_signals = _detect_endorsement_conflicts(raw_results)
+    state["endorsement_signals"] = endorsement_signals
+
+    if endorsement_signals.get("present"):
+        prompt += (
+            "\n\nEndorsement conflict check (important):\n"
+            "- Endorsements may modify or override the base policy language.\n"
+            "- If you see a conflict between endorsement and booklet/declarations, say so explicitly and prefer the endorsement text.\n"
+            "- If applicability is unclear (effective date / form / state), call it out under 'What to verify'.\n"
+        )
+
     # Give the model an explicit allow-list of citation tags.
     # This reduces invented chunk numbers and makes post-verification much more reliable.
-    raw_results = state.get("raw_results", []) or []
     allowed_tags: list[str] = []
     for r in raw_results:
         file_name = r.get("file_name")
@@ -231,7 +307,7 @@ def answer_node(state: GraphState) -> GraphState:
     if require_citations and allowed_tags:
         allowed_block = "\n".join(f"- {t}" for t in sorted(set(allowed_tags)))
         prompt += (
-            "\n\nHard citation rule (demo safety):\n"
+            "\n\nCitation rule (safety):\n"
             "- Use ONLY citation tags from this list (copy exactly).\n"
             "- Do NOT invent new chunk numbers or new file names.\n"
             "- Every bullet in the required sections must end with one or more citations.\n\n"
@@ -475,8 +551,7 @@ def verify_citations_node(state: GraphState) -> GraphState:
     check = _verify_answer_citations(answer, raw_results)
     dt_ms = (time.perf_counter() - started) * 1000.0
 
-    # One retry to handle citation-formatting drift: if citations are malformed or invented,
-    # request a rewrite constrained to the allowed citation tags.
+    # One retry for citation-formatting drift. More than that just burns time.
     retry_count = int(state.get("answer_retry_count") or 0)
     if not check.get("passed") and retry_count < 1:
         sources = state.get("sources") or "(no sources found)"
@@ -644,10 +719,10 @@ def validate_node(state: GraphState) -> GraphState:
         if low_conf and low_diversity:
             blocked = True
             reasons.append(
-                "Evidence is too thin (low diversity + weak relevance). The safer move is to stop and ask for better evidence."
+                "Evidence is too thin (low diversity + weak relevance). Safer to stop and ask for better evidence."
             )
             next_actions.append("Index more of the policy packet (declarations + endorsements + policy booklet).")
-            next_actions.append("Rephrase the question using policy terms (e.g., ‘water backup’, ‘sewer’, ‘sump overflow’).")
+            next_actions.append("Rephrase the question using policy terms (e.g., 'water backup', 'sewer', 'sump overflow').")
         elif low_diversity:
             warnings.append("Evidence comes from a narrow slice of the packet; treat the answer as incomplete.")
 

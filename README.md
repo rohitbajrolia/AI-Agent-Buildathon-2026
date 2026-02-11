@@ -1,13 +1,13 @@
 # Home Insurance Coverage Concierge (MCP + Qdrant + Streamlit)
 
-This workspace is a local demo that answers homeowners insurance coverage questions grounded in your policy PDFs.
+This workspace is a local application that answers homeowners insurance coverage questions grounded in your policy PDFs.
 It runs three parts: Qdrant for vector search, an MCP tool server for ingest/index/retrieve, and a Streamlit UI that runs a LangGraph workflow to produce a cited answer.
 
 ## What this application provides (brief)
 
-- Policy-grounded Q&A with citations tied to retrieved snippets.
+- Evidence-backed Q&A with citations tied to retrieved snippets.
 - Explicit ingest and index steps so you control when docs are processed.
-- An audit trail with redacted previews for demo transparency.
+- An audit trail with redacted previews for transparency.
 - Local-first docs: policy PDFs stay under `docs/` and are git-ignored.
 
 ## Flow (correct order, what each step does)
@@ -15,9 +15,30 @@ It runs three parts: Qdrant for vector search, an MCP tool server for ingest/ind
 1. Start Qdrant (vector DB). It stores embeddings so retrieval is fast and persistent across restarts.
 2. Start the MCP server. It exposes tools like `health`, `ingest_folder`, `index_folder_qdrant`, `retrieve_clauses`, and `index_status`.
 3. Start the Streamlit UI. The UI calls MCP tools and runs the LangGraph workflow.
-4. Ingest Folder (UI button). The server scans PDFs/images under `docs/`, extracts text (with OCR fallback for scanned pages), and returns file summaries. No embeddings yet.
-5. Index to Qdrant (UI button). The server chunks text, generates embeddings, and upserts them to Qdrant in batches. The index status becomes ready.
-6. Ask Concierge (UI button). LangGraph runs `retrieve -> validate -> answer -> citation_verify`. If evidence is weak or citations are invalid, the run is blocked. Otherwise the UI shows the answer, sources, and an audit trace download.
+4. (Optional) Run the sidebar Self-check (quick). It validates `health`, `index_status`, and a small retrieval call when the index is ready.
+5. Ingest Folder (UI button). The server scans PDFs/images under `docs/`, extracts text (with OCR fallback for scanned pages), and returns file summaries. No embeddings yet.
+6. Index to Qdrant (UI button). The server chunks text, generates embeddings, and upserts them to Qdrant in batches. The index status becomes ready.
+7. Ask Concierge (UI button). The workflow runs `retrieve -> validate -> answer -> citation_verify`. If evidence is weak or citations are invalid, the run is blocked. Otherwise the UI shows the answer, sources, and an audit trace download.
+
+Indexing note: if a Qdrant collection already exists, the UI skips re-indexing unless you confirm docs changed (checkbox: “I added/updated documents - re-index”).
+
+## Prerequisites (machine setup)
+
+Required:
+
+- Python 3.12+
+- Docker Desktop (for Qdrant)
+- Git Bash or PowerShell (the run scripts support both)
+
+Optional:
+
+- Tesseract OCR (only needed if your PDFs are scanned images and you enable OCR fallback)
+- `pandoc` (only needed for higher-fidelity DOCX/PDF exports; exports still work without it)
+
+Ports (defaults):
+
+- MCP server: `4200`
+- Streamlit UI: `8501`
 
 ## Quick start (Windows + Git Bash)
 
@@ -67,3 +88,43 @@ bash ./stop_demo.sh
 - Overall diagrams and flows: `ARCHITECTURE.md`
 - Server setup + Qdrant notes: `home-insurance-mcp/README.md`
 - Client UI + demo steps: `home-insurance-mcp-client/README.md`
+
+## Project brief and narrative
+
+- One-page brief: `PROJECT_BRIEF.md`
+- Proposal doc: `BUILDATHON_SUBMISSION.md`
+- 90-second pitch: `PITCH_90_SECONDS.md`
+
+## Export (DOCX/PDF)
+
+Git Bash:
+
+```bash
+bash scripts/export_submission.sh
+```
+
+PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/export_submission.ps1
+```
+
+If `pandoc` is installed, the scripts use it for higher-fidelity output.
+If not, they fall back to a dependency-free exporter (`scripts/export_submission_local.py`) that still produces `.docx`, `.pdf` (text-only), and `.html`.
+
+## Testing (MCP)
+
+- MCP URL (default): `http://127.0.0.1:4200/mcp/`
+- MCP Inspector: connect to the URL above and run `health`, then `index_status`.
+- Smoke test (tool calls):
+
+```bash
+cd home-insurance-mcp-client
+python scripts/client_smoke.py
+```
+
+## Impact (pilot targets)
+
+- Reduce policy clause lookup time from 12 minutes to 7 minutes (~42% reduction)
+- Improve first-contact resolution by 10-15% for common coverage questions
+- Reduce escalations by 5-10% by making evidence and "what to verify" explicit
