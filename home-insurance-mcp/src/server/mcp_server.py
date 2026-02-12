@@ -604,9 +604,7 @@ def ensure_collection(collection_name: str, vector_size: int):
 
 
 
-
-@app.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+async def _call_tool_impl(name: str, arguments: dict) -> list[types.TextContent]:
     """
     MCP tool dispatcher.
     This is the switchboard: tool calls come in by `name` with JSON `arguments`.
@@ -617,6 +615,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             "server": "home-insurance-mcp",
             "unix_time": int(time.time()),
             "note": "MCP server running (streamable HTTP, stateless)",
+            "docs_root": str(DOCS_ROOT),
+            "docs_root_exists": DOCS_ROOT.exists(),
         }
         return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
     
@@ -690,6 +690,26 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         payload = {
             "count": len(tickets),
             "tickets": tickets,
+        }
+        return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
+
+    return [
+        types.TextContent(
+            type="text",
+            text=json.dumps({"status": "error", "error": f"Unknown tool: {name}"}, indent=2),
+        )
+    ]
+
+
+@app.call_tool()
+async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+    try:
+        return await _call_tool_impl(name, arguments)
+    except Exception as e:
+        payload = {
+            "status": "error",
+            "tool": name,
+            "error": _redact_error_text(e),
         }
         return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
 

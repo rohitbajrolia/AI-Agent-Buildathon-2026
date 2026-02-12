@@ -119,6 +119,38 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+def _format_error_for_ui(e: BaseException) -> str:
+    """Make async/network errors readable in the Streamlit UI.
+
+    Some network failures bubble up as an ExceptionGroup with the top-level message
+    "unhandled errors in a TaskGroup". We unwrap to the root exception(s).
+    """
+
+    def _flatten(exc: BaseException) -> list[BaseException]:
+        inner = getattr(exc, "exceptions", None)
+        if isinstance(inner, list) and inner:
+            out: list[BaseException] = []
+            for sub in inner:
+                out.extend(_flatten(sub))
+            return out
+        return [exc]
+
+    flattened = _flatten(e)
+    parts: list[str] = []
+    for sub in flattened[:3]:
+        msg = str(sub).strip()
+        parts.append(f"{type(sub).__name__}: {msg}" if msg else type(sub).__name__)
+    if len(flattened) > 3:
+        parts.append(f"...and {len(flattened) - 3} more")
+
+    base = "; ".join(parts) if parts else str(e)
+
+    # Add a helpful hint for the most common failure mode.
+    if "connection" in base.lower() or "connect" in base.lower() or "refused" in base.lower():
+        base += f"\n\nCheck: MCP server is running and MCP_SERVER_URL is correct ({mcp_client.MCP_SERVER_URL})."
+    return base
+
+
 def _redact_display_text(text: str) -> str:
     s = (text or "").strip()
     if not s:
@@ -522,6 +554,8 @@ with st.sidebar:
                     overlap=int(overlap),
                 )
             )
+            if isinstance(job, dict) and job.get("status") == "error":
+                raise RuntimeError(job.get("error") or "Failed to start ingest")
             job_id = (job or {}).get("job_id")
             if not job_id:
                 raise RuntimeError("Failed to start ingest job")
@@ -554,7 +588,7 @@ with st.sidebar:
 
                 time.sleep(0.35)
         except Exception as e:
-            st.error(f"Ingest failed: {e}")
+            st.error(f"Ingest failed: {_format_error_for_ui(e)}")
 
     if do_index:
         try:
@@ -572,6 +606,8 @@ with st.sidebar:
                     batch_size=64,
                 )
             )
+            if isinstance(job, dict) and job.get("status") == "error":
+                raise RuntimeError(job.get("error") or "Failed to start indexing")
             job_id = (job or {}).get("job_id")
             if not job_id:
                 raise RuntimeError("Failed to start index job")
@@ -622,7 +658,7 @@ with st.sidebar:
 
                 time.sleep(0.35)
         except Exception as e:
-            st.error(f"Index failed: {e}")
+            st.error(f"Index failed: {_format_error_for_ui(e)}")
 
 # ---------- INPUTS ----------
 left, right = st.columns([2, 1])
