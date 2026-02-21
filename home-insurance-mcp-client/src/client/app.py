@@ -862,6 +862,8 @@ def _render_run(*, out: dict, question: str, state: str, require_citations: bool
     run_id = out.get("run_id")
     blocked = bool(out.get("blocked", False))
     validation = out.get("validation", None)
+    retrieval_plan = out.get("retrieval_plan")
+    precedence_check = out.get("precedence_check")
 
     st.session_state["last_trace"] = trace
     st.session_state["last_run_id"] = run_id
@@ -1033,10 +1035,31 @@ def _render_run(*, out: dict, question: str, state: str, require_citations: bool
         )
 
         sanitized_matches = _sanitize_retrieved_matches_for_audit(raw_results)
+
+        doc_type_counts: dict[str, int] = {}
+        for r in raw_results or []:
+            dt = r.get("doc_type")
+            if isinstance(dt, str) and dt:
+                doc_type_counts[dt] = doc_type_counts.get(dt, 0) + 1
+
+        retrieval_topic_counts: dict[str, int] = {}
+        for r in raw_results or []:
+            topics = r.get("retrieval_topics")
+            if isinstance(topics, list):
+                for t in topics:
+                    if isinstance(t, str) and t:
+                        retrieval_topic_counts[t] = retrieval_topic_counts.get(t, 0) + 1
         trace_bundle = {
             "run_id": run_id,
             "inputs": {"question": question, "state": state, "require_citations": require_citations},
             "validation": validation,
+            "retrieval_plan": retrieval_plan,
+            "precedence_check": precedence_check,
+            "evidence_summary": {
+                "doc_type_counts": doc_type_counts,
+                "retrieval_topic_counts": retrieval_topic_counts,
+                "retrieved_matches": len(raw_results or []),
+            },
             "trace": trace,
             "retrieved_matches": sanitized_matches,
         }
@@ -1046,8 +1069,17 @@ def _render_run(*, out: dict, question: str, state: str, require_citations: bool
             st.markdown("**Steps (trace)**")
             st.json(trace)
         with col2:
-            st.markdown("**Inputs + retrieved matches**")
-            st.json({"inputs": trace_bundle["inputs"], "validation": validation, "retrieved_matches": sanitized_matches})
+            st.markdown("**Inputs + evidence**")
+            st.json(
+                {
+                    "inputs": trace_bundle["inputs"],
+                    "validation": validation,
+                    "retrieval_plan": retrieval_plan,
+                    "precedence_check": precedence_check,
+                    "evidence_summary": trace_bundle["evidence_summary"],
+                    "retrieved_matches": sanitized_matches,
+                }
+            )
 
         st.download_button(
             "Download audit trace (JSON)",

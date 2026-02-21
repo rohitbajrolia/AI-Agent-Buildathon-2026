@@ -32,6 +32,8 @@ class GraphState(TypedDict):
     validation: NotRequired[dict[str, Any]]
     answer_retry_count: NotRequired[int]
     endorsement_signals: NotRequired[dict[str, Any]]
+    retrieval_plan: NotRequired[list[dict[str, Any]]]
+    precedence_check: NotRequired[dict[str, Any]]
 
 
 _ENDORSEMENT_MODIFY_PATTERNS: list[re.Pattern] = [
@@ -155,48 +157,167 @@ def _append_trace(state: GraphState, event: dict[str, Any]) -> None:
     trace.append(event)
 
 
-def retrieve_node(state: GraphState) -> GraphState:
-    """
-    Node 1: Fetch relevant clauses from Qdrant via MCP.
-    Input:  state["question"]
-    Output: state["sources"] (a formatted string)
-    """
+def _stable_result_key(r: dict[str, Any]) -> tuple[str, str, int, int | None] | None:
+    file_name = r.get("file_name")
+    doc_type = r.get("doc_type")
+    chunk_index = r.get("chunk_index")
+    page_number = r.get("page_number")
+
+    if not isinstance(file_name, str) or not file_name.strip():
+        return None
+    if not isinstance(doc_type, str) or not doc_type.strip():
+        return None
+    if not isinstance(chunk_index, int):
+        return None
+    if page_number is not None and not isinstance(page_number, int):
+        page_number = None
+
+    return (file_name.strip(), doc_type.strip(), int(chunk_index), page_number)
+
+
+def _build_retrieval_plan(*, question: str, state_code: str) -> list[dict[str, str]]:
+    q = (question or "").strip()
+    if not q:
+        return []
+
+    plan: list[dict[str, str]] = []
+    plan.append({"topic": "Coverage grant", "query": q})
+    plan.append({"topic": "Definitions", "query": f"Definitions that matter for: {q}"})
+    plan.append({"topic": "Exclusions / limits", "query": f"Exclusions, limitations, and not covered language for: {q}"})
+    plan.append(
+        {
+            "topic": "Endorsements / changes",
+            "query": "Endorsement language that changes, replaces, modifies, or supersedes base policy terms for: " + q,
+        }
+    )
+
+    q_lower = q.lower()
+    if any(w in q_lower for w in ["deductible", "conditions", "duties", "notice", "proof of loss"]):
+        plan.append({"topic": "Conditions / duties", "query": f"Conditions, duties after loss, and notice requirements related to: {q}"})
+
+    if any(w in q_lower for w in ["state", "jurisdiction"]):
+        plan.append({"topic": "State-specific", "query": f"State-specific clauses for {state_code}: {q}"})
+
+    return plan[:5]
+
+
+def plan_retrievals_node(state: GraphState) -> GraphState:
     if not state.get("run_id"):
         state["run_id"] = uuid.uuid4().hex
 
     question = state["question"]
+    state_code = state.get("state", "IL")
 
-    # LangGraph node is sync, MCP client is async. This is the simplest bridge.
+    plan_raw = _build_retrieval_plan(question=question, state_code=state_code)
+    state["retrieval_plan"] = [
+        {"topic": p.get("topic", ""), "query_redacted": _redact_text(p.get("query", "")).get("preview", "")}
+        for p in plan_raw
+    ]
+
+    _append_trace(
+        state,
+        {
+            "ts": _now_iso_utc(),
+            "step": "plan",
+            "question": _redact_text(question),
+            "jurisdiction": state_code,
+            "planned": state.get("retrieval_plan", []),
+        },
+    )
+    return state
+
+
+def multi_retrieve_node(state: GraphState) -> GraphState:
+    question = state["question"]
+    state_code = state.get("state", "IL")
+    plan_raw = _build_retrieval_plan(question=question, state_code=state_code)
+
+    if not plan_raw:
+        state["sources"] = "(no sources found)"
+        state["raw_results"] = []
+        return state
+
     import asyncio
+
     t0 = time.perf_counter()
-    try:
-        data = asyncio.run(retrieve_clauses(question, top_k=5))
-        err = None
-    except Exception as e:
-        data = {"results": []}
-        err = str(e)
+    errors: list[str] = []
+    combined: list[dict[str, Any]] = []
+
+    for p in plan_raw:
+        topic = p.get("topic") or "(untitled)"
+        query = p.get("query") or question
+        try:
+            data = asyncio.run(retrieve_clauses(query, top_k=4))
+            results = data.get("results", []) if isinstance(data, dict) else []
+        except Exception as e:
+            results = []
+            errors.append(f"{topic}: {e}")
+
+        for r in results or []:
+            if not isinstance(r, dict):
+                continue
+            r2 = dict(r)
+            r2["retrieval_topic"] = topic
+            combined.append(r2)
+
+    deduped: dict[tuple[str, str, int, int | None], dict[str, Any]] = {}
+    for r in combined:
+        key = _stable_result_key(r)
+        if key is None:
+            continue
+
+        existing = deduped.get(key)
+        if existing is None:
+            r3 = dict(r)
+            r3["retrieval_topics"] = [r.get("retrieval_topic")] if r.get("retrieval_topic") else []
+            deduped[key] = r3
+            continue
+
+        topics = list(existing.get("retrieval_topics") or [])
+        t = r.get("retrieval_topic")
+        if isinstance(t, str) and t and t not in topics:
+            topics.append(t)
+            existing["retrieval_topics"] = topics
+
+        old_score = existing.get("score")
+        new_score = r.get("score")
+        if isinstance(new_score, (int, float)) and (not isinstance(old_score, (int, float)) or float(new_score) > float(old_score)):
+            for k in ["score", "snippet", "text"]:
+                if k in r:
+                    existing[k] = r.get(k)
+
+    results_final = list(deduped.values())
+    results_final.sort(key=lambda x: float(x.get("score") or 0.0), reverse=True)
+    results_final = results_final[:12]
+
     dt_ms = (time.perf_counter() - t0) * 1000.0
 
-    # Convert results list into a readable SOURCES block for the answer step.
-    lines = []
-    for r in data.get("results", []):
+    lines: list[str] = []
+    for r in results_final:
         page_number = r.get("page_number")
         if page_number is not None:
             cite = f'[{r.get("file_name")} | {r.get("doc_type")} | p. {page_number} | chunk {r.get("chunk_index")}]'
         else:
             cite = f'[{r.get("file_name")} | {r.get("doc_type")} | chunk {r.get("chunk_index")}]'
         snippet = (r.get("snippet") or "").replace("\n", " ").strip()
-        # Keep this short; long snippets add latency without helping citations.
         if len(snippet) > 360:
             snippet = snippet[:360].rstrip() + "..."
         lines.append(f"- {cite} {snippet}")
 
     state["sources"] = "\n".join(lines) if lines else "(no sources found)"
-    state["raw_results"] = data.get("results", [])
+    state["raw_results"] = results_final
 
-    results = state.get("raw_results", [])
+    by_topic: dict[str, int] = {}
+    for r in results_final:
+        topics = r.get("retrieval_topics")
+        if not isinstance(topics, list):
+            continue
+        for t in topics:
+            if isinstance(t, str) and t:
+                by_topic[t] = by_topic.get(t, 0) + 1
+
     top_scores: list[float] = []
-    for r in results[:3]:
+    for r in results_final[:3]:
         s = r.get("score")
         if isinstance(s, (int, float)):
             top_scores.append(float(s))
@@ -206,28 +327,77 @@ def retrieve_node(state: GraphState) -> GraphState:
         {
             "ts": _now_iso_utc(),
             "step": "retrieve",
-            "tool": "retrieve_clauses",
             "duration_ms": round(dt_ms, 1),
             "question": _redact_text(question),
-            "args": {"top_k": 5},
-            "result_count": len(results),
+            "planned_topics": [p.get("topic") for p in plan_raw],
+            "per_topic_matches": by_topic,
+            "result_count": len(results_final),
             "top_scores": top_scores,
-            "error": err,
+            "errors": errors[:5],
         },
     )
 
-    if err:
+    if errors and not results_final:
         state["blocked"] = True
         state["validation"] = {
             "passed": False,
-            "reasons": ["Retrieval failed; cannot proceed safely.", err],
+            "reasons": ["Retrieval failed; cannot proceed safely."] + errors[:3],
             "warnings": [],
             "next_actions": [
-                "Check MCP server, Qdrant, and OPENAI_API_KEY, then try again.",
-                "Refresh Index Status in the sidebar to confirm readiness.",
+                "Confirm the tool server and Qdrant are running, then try again.",
+                "Use Refresh Index Status in the sidebar to confirm readiness.",
             ],
             "stats": {"result_count": 0, "unique_files": 0, "unique_doc_types": 0, "max_score": None},
         }
+
+    return state
+
+
+def precedence_check_node(state: GraphState) -> GraphState:
+    results = state.get("raw_results", []) or []
+    endorsement_signals = _detect_endorsement_conflicts(results)
+    state["endorsement_signals"] = endorsement_signals
+
+    override_risk = bool(
+        endorsement_signals.get("present")
+        and endorsement_signals.get("modification_language_found")
+        and (endorsement_signals.get("endorsement_matches") or 0) > 0
+    )
+
+    state["precedence_check"] = {
+        "endorsements_retrieved": bool(endorsement_signals.get("present")),
+        "override_risk": override_risk,
+        "note": (
+            "Endorsements can change base policy wording. If there is a conflict, treat the endorsement as controlling and verify form, effective date, and state."
+            if endorsement_signals.get("present")
+            else "No endorsements were retrieved in the top matches."
+        ),
+    }
+
+    _append_trace(
+        state,
+        {
+            "ts": _now_iso_utc(),
+            "step": "precedence_check",
+            "endorsements_retrieved": bool(endorsement_signals.get("present")),
+            "override_risk": override_risk,
+        },
+    )
+    return state
+
+
+def retrieve_node(state: GraphState) -> GraphState:
+    """
+    Backward-compatible wrapper for retrieval.
+
+    Runs:
+    - plan_retrievals_node
+    - multi_retrieve_node
+    - precedence_check_node
+    """
+    state = plan_retrievals_node(state)
+    state = multi_retrieve_node(state)
+    state = precedence_check_node(state)
     return state
 
 
@@ -255,7 +425,7 @@ def answer_node(state: GraphState) -> GraphState:
             {
                 "ts": _now_iso_utc(),
                 "step": "answer",
-                "model": "gpt-4.1-mini",
+                "engine": "text_generation",
                 "duration_ms": 0.0,
                 "error": "missing_openai_key",
             },
@@ -269,19 +439,24 @@ def answer_node(state: GraphState) -> GraphState:
         require_citations=require_citations,
     )
 
-    # Endorsement check: if endorsements show up, flag possible overrides.
-    # This part was a pain to get right; keep it simple and explicit.
     raw_results = state.get("raw_results", []) or []
-    endorsement_signals = _detect_endorsement_conflicts(raw_results)
-    state["endorsement_signals"] = endorsement_signals
+    endorsement_signals = state.get("endorsement_signals")
+    if not isinstance(endorsement_signals, dict):
+        endorsement_signals = _detect_endorsement_conflicts(raw_results)
+        state["endorsement_signals"] = endorsement_signals
+
+    precedence_obj = state.get("precedence_check")
+    precedence: dict[str, Any] = precedence_obj if isinstance(precedence_obj, dict) else {}
 
     if endorsement_signals.get("present"):
         prompt += (
-            "\n\nEndorsement conflict check (important):\n"
-            "- Endorsements may modify or override the base policy language.\n"
-            "- If you see a conflict between endorsement and booklet/declarations, say so explicitly and prefer the endorsement text.\n"
-            "- If applicability is unclear (effective date / form / state), call it out under 'What to verify'.\n"
+            "\n\nEndorsement precedence note:\n"
+            "- Endorsements can change base policy language.\n"
+            "- If endorsement text conflicts with booklet or declarations, call out the conflict and treat the endorsement as controlling.\n"
+            "- If applicability is unclear (form, effective date, state), list it under 'What to verify'.\n"
         )
+        if precedence.get("override_risk"):
+            prompt += "- Override risk is flagged based on the retrieved endorsement language.\n"
 
     # Provide an explicit allow-list of citation tags.
     # This reduces made-up chunk numbers and makes the verification step more reliable.
@@ -324,7 +499,7 @@ def answer_node(state: GraphState) -> GraphState:
                 {"role": "user", "content": prompt},
             ],
             temperature=0.0,
-            max_tokens=350,
+            max_tokens=500,
             timeout=30.0,
         )
         error = None
@@ -348,7 +523,7 @@ def answer_node(state: GraphState) -> GraphState:
             {
                 "ts": _now_iso_utc(),
                 "step": "answer",
-                "model": "gpt-4.1-mini",
+                "engine": "text_generation",
                 "temperature": 0.0,
                 "duration_ms": round(dt_ms, 1),
                 "error": error,
@@ -372,12 +547,12 @@ def answer_node(state: GraphState) -> GraphState:
         {
             "ts": _now_iso_utc(),
             "step": "answer",
-            "model": "gpt-4.1-mini",
+            "engine": "text_generation",
             "temperature": 0.0,
             "duration_ms": round(dt_ms, 1),
             "jurisdiction": state_code,
             "require_citations": bool(require_citations),
-            "prompt_chars": len(prompt),
+            "input_chars": len(prompt),
             "sources_chars": len(sources),
             "usage": usage,
             "error": None,
@@ -392,8 +567,7 @@ def _normalize_required_bullet_citations(answer: str) -> str:
     This does not add or remove citations; it only normalizes placement so the
     verification rule ("bullets end with citations") isn't tripped by harmless formatting.
     """
-    required_sections = {"Coverage answer", "Key conditions / exclusions to watch"}
-    current_section: str | None = None
+    current_required: str | None = None
     out_lines: list[str] = []
 
     for raw_line in (answer or "").splitlines():
@@ -401,11 +575,12 @@ def _normalize_required_bullet_citations(answer: str) -> str:
         stripped = line.strip()
 
         if stripped.endswith(":"):
-            current_section = stripped[:-1].strip()
+            header = stripped[:-1].strip()
+            current_required = _required_section_key(header)
             out_lines.append(line)
             continue
 
-        if current_section in required_sections and stripped.startswith("-"):
+        if current_required is not None and stripped.startswith("-"):
             cites = [m.group(0) for m in _CITATION_RE.finditer(line)]
             if cites:
                 # Remove citations from their original positions.
@@ -418,6 +593,69 @@ def _normalize_required_bullet_citations(answer: str) -> str:
 
         out_lines.append(line)
 
+    return "\n".join(out_lines)
+
+
+def _collapse_wrapped_required_bullets(answer: str) -> str:
+    """Collapse wrapped bullet lines in required sections into single logical bullets.
+
+    Some model outputs hard-wrap long bullets across multiple lines. The citation
+    verifier expects each required bullet to be a single line that ends with one
+    or more citations. This normalizes formatting without changing meaning.
+    """
+    current_required: str | None = None
+    out_lines: list[str] = []
+
+    bullet_acc: str | None = None
+
+    def _flush_bullet() -> None:
+        nonlocal bullet_acc
+        if bullet_acc is not None:
+            out_lines.append(bullet_acc.rstrip())
+            bullet_acc = None
+
+    for raw_line in (answer or "").splitlines():
+        line = raw_line.rstrip("\n")
+        stripped = line.strip()
+
+        # Section header
+        if stripped.endswith(":"):
+            _flush_bullet()
+            header = stripped[:-1].strip()
+            current_required = _required_section_key(header)
+            out_lines.append(line)
+            continue
+
+        # Some outputs insert blank lines mid-bullet. Ignore those while accumulating.
+        if bullet_acc is not None and not stripped:
+            continue
+
+        if current_required is not None and stripped.startswith("-"):
+            # Sometimes a single bullet gets hard-wrapped and the next line
+            # incorrectly starts with '-' again. If the prior bullet is just a
+            # short fragment with no citations, treat this as a continuation.
+            if bullet_acc is not None:
+                prior_has_cite = bool(_CITATION_RE.search(bullet_acc))
+                prior_short = len(bullet_acc) <= 48
+                continuation_text = stripped[1:].lstrip()
+                continuation_starts_lower = bool(continuation_text) and continuation_text[:1].islower()
+                if (not prior_has_cite) and prior_short and continuation_starts_lower:
+                    bullet_acc = (bullet_acc.rstrip() + " " + continuation_text).strip()
+                    continue
+
+            _flush_bullet()
+            bullet_acc = stripped
+            continue
+
+        # Continuation of a wrapped bullet inside required sections
+        if current_required is not None and bullet_acc is not None and stripped and not stripped.startswith("-"):
+            bullet_acc = (bullet_acc.rstrip() + " " + stripped).strip()
+            continue
+
+        _flush_bullet()
+        out_lines.append(line)
+
+    _flush_bullet()
     return "\n".join(out_lines)
 
 
@@ -464,11 +702,7 @@ def _citation_matches(
 
 
 def _bullets_requiring_citations(answer: str) -> list[str]:
-    required_sections = {
-        "Coverage answer": True,
-        "Key conditions / exclusions to watch": True,
-    }
-    current_section: str | None = None
+    current_required: str | None = None
     bullets: list[str] = []
 
     for raw_line in (answer or "").splitlines():
@@ -478,13 +712,28 @@ def _bullets_requiring_citations(answer: str) -> list[str]:
 
         if line.endswith(":"):
             header = line[:-1].strip()
-            current_section = header
+            current_required = _required_section_key(header)
             continue
 
-        if line.startswith("-") and current_section in required_sections:
+        if line.startswith("-") and current_required is not None:
             bullets.append(line)
 
     return bullets
+
+
+def _required_section_key(header: str) -> str | None:
+    """Return a stable key for required sections, tolerating minor formatting drift."""
+    h = (header or "").strip().lower()
+    # Normalize punctuation/slashes to spaces, collapse whitespace.
+    h = re.sub(r"[^a-z0-9]+", " ", h)
+    h = re.sub(r"\s+", " ", h).strip()
+
+    if h == "coverage answer":
+        return "coverage"
+    # Accept minor variations like "key conditions exclusions to watch".
+    if h.startswith("key conditions"):
+        return "conditions"
+    return None
 
 
 def _verify_answer_citations(answer: str, raw_results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -524,6 +773,7 @@ def _verify_answer_citations(answer: str, raw_results: list[dict[str, Any]]) -> 
     return {
         "passed": len(issues) == 0,
         "issues": issues,
+        "bad_bullets_preview": [b[:240] for b in bad_bullets[:3]],
         "stats": {
             "retrieved_matches": len(raw_results or []),
             "expected_citation_keys": len(expected),
@@ -541,7 +791,14 @@ def verify_citations_node(state: GraphState) -> GraphState:
     answer = state.get("answer") or ""
     raw_results = state.get("raw_results", []) or []
 
-    # First, normalize harmless formatting issues (citations mid-bullet).
+    # First, collapse wrapped bullets in required sections so we don't mis-read
+    # line breaks as missing end-of-bullet citations.
+    collapsed = _collapse_wrapped_required_bullets(answer)
+    if collapsed != answer:
+        answer = collapsed
+        state["answer"] = collapsed
+
+    # Then, normalize harmless formatting issues (citations mid-bullet).
     normalized = _normalize_required_bullet_citations(answer)
     if normalized != answer:
         answer = normalized
@@ -587,6 +844,8 @@ def verify_citations_node(state: GraphState) -> GraphState:
             retry_prompt += (
                 "\n\nYour previous draft failed citation checks. Rewrite from scratch.\n"
                 "Rules (must follow):\n"
+                "- Keep it short: use exactly 2 bullets in 'Coverage answer' and exactly 2 bullets in 'Key conditions / exclusions to watch'.\n"
+                "- Keep each bullet concise (aim for one sentence).\n"
                 "- Use ONLY citation tags from the Allowed list (copy exactly).\n"
                 "- Every bullet in 'Coverage answer' and 'Key conditions / exclusions to watch' must end with citations.\n"
                 "- Do not add any extra prose after the last citation on a bullet.\n\n"
@@ -602,10 +861,11 @@ def verify_citations_node(state: GraphState) -> GraphState:
                         {"role": "user", "content": retry_prompt},
                     ],
                     temperature=0.0,
-                    max_tokens=350,
+                    max_tokens=500,
                     timeout=30.0,
                 )
                 rewritten = (resp.choices[0].message.content or "").strip()
+                rewritten = _collapse_wrapped_required_bullets(rewritten)
                 rewritten = _normalize_required_bullet_citations(rewritten)
                 state["answer"] = rewritten
                 state["answer_retry_count"] = retry_count + 1
@@ -756,16 +1016,20 @@ def validate_node(state: GraphState) -> GraphState:
 
 def build_graph():
     """
-    Creates: retrieve -> answer -> END
+    Creates: plan -> retrieve -> precedence_check -> validate -> answer -> END
     """
     g = StateGraph(GraphState)
-    g.add_node("retrieve", retrieve_node)
+    g.add_node("plan", plan_retrievals_node)
+    g.add_node("retrieve", multi_retrieve_node)
+    g.add_node("precedence_check", precedence_check_node)
     g.add_node("validate", validate_node)
     g.add_node("answer", answer_node)
     g.add_node("citation_verify", verify_citations_node)
 
-    g.set_entry_point("retrieve")
-    g.add_edge("retrieve", "validate")
+    g.set_entry_point("plan")
+    g.add_edge("plan", "retrieve")
+    g.add_edge("retrieve", "precedence_check")
+    g.add_edge("precedence_check", "validate")
 
     def _route_after_validate(state: GraphState) -> str:
         return "end" if state.get("blocked") else "answer"
