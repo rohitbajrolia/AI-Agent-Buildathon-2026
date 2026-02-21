@@ -425,7 +425,7 @@ def _extract_amount(raw_text: str, keywords: list[str]) -> float | None:
 
 def _redact_error_text(message: object) -> str:
     m = str(message or "")
-    # Redact OpenAI-style secret keys if they ever appear in exception text.
+    # Redact secret keys if they ever appear in exception text.
     m = re.sub(r"sk-[A-Za-z0-9_-]{10,}", "sk-***", m)
     return m
 
@@ -604,9 +604,7 @@ def ensure_collection(collection_name: str, vector_size: int):
 
 
 
-
-@app.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+async def _call_tool_impl(name: str, arguments: dict) -> list[types.TextContent]:
     """
     MCP tool dispatcher.
     This is the switchboard: tool calls come in by `name` with JSON `arguments`.
@@ -617,6 +615,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             "server": "home-insurance-mcp",
             "unix_time": int(time.time()),
             "note": "MCP server running (streamable HTTP, stateless)",
+            "docs_root": str(DOCS_ROOT),
+            "docs_root_exists": DOCS_ROOT.exists(),
         }
         return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
     
@@ -709,7 +709,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             },
         )
 
-        async def _runner():
+        async def _runner() -> None:
             try:
                 await asyncio.to_thread(
                     _run_ingest_job,
@@ -720,7 +720,13 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                     overlap=overlap,
                 )
             except Exception as e:
-                _job_update(job_id, status="failed", message="failed", error=_redact_error_text(e), finished_unix=int(time.time()))
+                _job_update(
+                    job_id,
+                    status="failed",
+                    message="failed",
+                    error=_redact_error_text(e),
+                    finished_unix=int(time.time()),
+                )
 
         asyncio.create_task(_runner())
         return [types.TextContent(type="text", text=json.dumps({"job_id": job_id}, indent=2))]
@@ -743,7 +749,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             },
         )
 
-        async def _runner():
+        async def _runner() -> None:
             try:
                 await asyncio.to_thread(
                     _run_index_job,
@@ -755,7 +761,13 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                     batch_size=batch_size,
                 )
             except Exception as e:
-                _job_update(job_id, status="failed", message="failed", error=_redact_error_text(e), finished_unix=int(time.time()))
+                _job_update(
+                    job_id,
+                    status="failed",
+                    message="failed",
+                    error=_redact_error_text(e),
+                    finished_unix=int(time.time()),
+                )
 
         asyncio.create_task(_runner())
         return [types.TextContent(type="text", text=json.dumps({"job_id": job_id}, indent=2))]
@@ -763,12 +775,22 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     if name == "job_status":
         job_id = (arguments.get("job_id") or "").strip()
         if not job_id:
-            return [types.TextContent(type="text", text=json.dumps({"status": "error", "error": "job_id is required"}, indent=2))]
+            return [
+                types.TextContent(
+                    type="text",
+                    text=json.dumps({"status": "error", "error": "job_id is required"}, indent=2),
+                )
+            ]
         rec = _job_get(job_id)
         if not rec:
-            return [types.TextContent(type="text", text=json.dumps({"status": "error", "error": "job not found", "job_id": job_id}, indent=2))]
+            return [
+                types.TextContent(
+                    type="text",
+                    text=json.dumps({"status": "error", "error": "job not found", "job_id": job_id}, indent=2),
+                )
+            ]
         return [types.TextContent(type="text", text=json.dumps(rec, indent=2))]
-    
+
     if name == "ingest_folder":
         folder_path = _resolve_docs_folder(arguments["folder_path"])
         max_pages = int(arguments.get("max_pages", 25))
@@ -794,12 +816,14 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
                 rel = str(p.relative_to(folder_path)).replace("\\", "/")
 
-                summaries.append({
-                    "file_name": rel,
-                    "doc_type": doc_type,
-                    "text_chars": len(text),
-                    "chunks_count": len(chunks),
-                })
+                summaries.append(
+                    {
+                        "file_name": rel,
+                        "doc_type": doc_type,
+                        "text_chars": len(text),
+                        "chunks_count": len(chunks),
+                    }
+                )
             except Exception as e:
                 errors.append({"file_name": str(p.relative_to(folder_path)).replace("\\", "/"), "error": _redact_error_text(e)})
 
@@ -812,7 +836,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         }
 
         return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
-    
+
     if name == "index_folder_qdrant":
         folder_path = _resolve_docs_folder(arguments["folder_path"])
         max_pages = int(arguments.get("max_pages", 25))
@@ -900,7 +924,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             "errors": errors,
         }
         return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
-    
+
     if name == "retrieve_clauses":
         query = arguments["query"]
         top_k = int(arguments.get("top_k", 5))
@@ -929,14 +953,16 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         results = []
         for h in hits:
             pl = h.payload or {}
-            results.append({
-                "score": float(h.score),
-                "file_name": pl.get("file_name"),
-                "doc_type": pl.get("doc_type"),
-                "page_number": pl.get("page_number"),
-                "chunk_index": pl.get("chunk_index"),
-                "snippet": (pl.get("text") or "")[:800],  # cap output
-            })
+            results.append(
+                {
+                    "score": float(h.score),
+                    "file_name": pl.get("file_name"),
+                    "doc_type": pl.get("doc_type"),
+                    "page_number": pl.get("page_number"),
+                    "chunk_index": pl.get("chunk_index"),
+                    "snippet": (pl.get("text") or "")[:800],
+                }
+            )
 
         return [types.TextContent(type="text", text=json.dumps({"results": results}, indent=2))]
 
@@ -960,6 +986,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         if ocr_fallback_enabled:
             try:
                 import fitz  # type: ignore
+
                 pymupdf_available = True
             except Exception:
                 pymupdf_available = False
@@ -985,7 +1012,6 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                     if openai_key_last4 is not None and env_file_openai_last4 is not None:
                         openai_key_matches_env_file = (openai_key_last4 == env_file_openai_last4)
             except Exception:
-                # Never fail status because a dotenv parse was weird.
                 pass
 
         try:
@@ -999,14 +1025,11 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                     cnt = qdrant.count(collection_name=QDRANT_COLLECTION, exact=False)
                     points_count = int(getattr(cnt, "count", 0))
                 except Exception:
-                    # Fallback for older client/server combos.
                     info = qdrant.get_collection(QDRANT_COLLECTION)
                     points_count = getattr(info, "points_count", None)
         except Exception as e:
             error = _redact_error_text(e)
 
-        # Optional: validate OpenAI credentials with a tiny call.
-        # Helps catch invalid keys early.
         check_openai = os.getenv("CHECK_OPENAI_ON_INDEX_STATUS", "1").strip().lower() in {"1", "true", "yes", "y"}
         cache_seconds = float(os.getenv("OPENAI_INDEX_STATUS_CACHE_SECONDS", "60") or "60")
         if check_openai and OPENAI_API_KEY:
@@ -1057,8 +1080,20 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         }
         return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
 
-
     raise ValueError(f"Unknown tool: {name}")
+
+
+@app.call_tool()
+async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+    try:
+        return await _call_tool_impl(name, arguments)
+    except Exception as e:
+        payload = {
+            "status": "error",
+            "tool": name,
+            "error": _redact_error_text(e),
+        }
+        return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
 
 @app.list_tools()
 async def list_tools() -> list[types.Tool]:
@@ -1087,6 +1122,49 @@ async def list_tools() -> list[types.Tool]:
                     "raw_text": {"type": "string", "description": "Optional raw text (OCR dump or copied text)."},
                 },
                 "required": [],
+                "additionalProperties": False,
+            },
+        ),
+        types.Tool(
+            name="start_ingest_job",
+            description="Start an ingest job (scan + extract + chunk counts) and return a job_id to poll.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "folder_path": {"type": "string", "description": "Absolute path under the configured docs root."},
+                    "max_pages": {"type": "integer", "default": 25},
+                    "chunk_size": {"type": "integer", "default": 1200},
+                    "overlap": {"type": "integer", "default": 150},
+                },
+                "required": ["folder_path"],
+                "additionalProperties": False,
+            },
+        ),
+        types.Tool(
+            name="start_index_job",
+            description="Start an index job (embed + upsert to Qdrant) and return a job_id to poll.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "folder_path": {"type": "string", "description": "Absolute path under the configured docs root."},
+                    "max_pages": {"type": "integer", "default": 25},
+                    "chunk_size": {"type": "integer", "default": 1200},
+                    "overlap": {"type": "integer", "default": 150},
+                    "batch_size": {"type": "integer", "default": 64},
+                },
+                "required": ["folder_path"],
+                "additionalProperties": False,
+            },
+        ),
+        types.Tool(
+            name="job_status",
+            description="Poll a previously started ingest/index job.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string"},
+                },
+                "required": ["job_id"],
                 "additionalProperties": False,
             },
         ),

@@ -119,6 +119,38 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+def _format_error_for_ui(e: BaseException) -> str:
+    """Make async/network errors readable in the Streamlit UI.
+
+    Some network failures bubble up as an ExceptionGroup with the top-level message
+    "unhandled errors in a TaskGroup". We unwrap to the root exception(s).
+    """
+
+    def _flatten(exc: BaseException) -> list[BaseException]:
+        inner = getattr(exc, "exceptions", None)
+        if isinstance(inner, list) and inner:
+            out: list[BaseException] = []
+            for sub in inner:
+                out.extend(_flatten(sub))
+            return out
+        return [exc]
+
+    flattened = _flatten(e)
+    parts: list[str] = []
+    for sub in flattened[:3]:
+        msg = str(sub).strip()
+        parts.append(f"{type(sub).__name__}: {msg}" if msg else type(sub).__name__)
+    if len(flattened) > 3:
+        parts.append(f"...and {len(flattened) - 3} more")
+
+    base = "; ".join(parts) if parts else str(e)
+
+    # Add a helpful hint for the most common failure mode.
+    if "connection" in base.lower() or "connect" in base.lower() or "refused" in base.lower():
+        base += f"\n\nCheck: MCP server is running and MCP_SERVER_URL is correct ({mcp_client.MCP_SERVER_URL})."
+    return base
+
+
 def _redact_display_text(text: str) -> str:
     s = (text or "").strip()
     if not s:
@@ -522,6 +554,8 @@ with st.sidebar:
                     overlap=int(overlap),
                 )
             )
+            if isinstance(job, dict) and job.get("status") == "error":
+                raise RuntimeError(job.get("error") or "Failed to start ingest")
             job_id = (job or {}).get("job_id")
             if not job_id:
                 raise RuntimeError("Failed to start ingest job")
@@ -554,7 +588,7 @@ with st.sidebar:
 
                 time.sleep(0.35)
         except Exception as e:
-            st.error(f"Ingest failed: {e}")
+            st.error(f"Ingest failed: {_format_error_for_ui(e)}")
 
     if do_index:
         try:
@@ -572,6 +606,8 @@ with st.sidebar:
                     batch_size=64,
                 )
             )
+            if isinstance(job, dict) and job.get("status") == "error":
+                raise RuntimeError(job.get("error") or "Failed to start indexing")
             job_id = (job or {}).get("job_id")
             if not job_id:
                 raise RuntimeError("Failed to start index job")
@@ -622,7 +658,7 @@ with st.sidebar:
 
                 time.sleep(0.35)
         except Exception as e:
-            st.error(f"Index failed: {e}")
+            st.error(f"Index failed: {_format_error_for_ui(e)}")
 
 # ---------- INPUTS ----------
 left, right = st.columns([2, 1])
@@ -636,10 +672,26 @@ DEMO_QUESTION_PRESETS = {
 }
 
 
+def _clear_last_run() -> None:
+    # Clear only run-related artifacts; keep indexing/ingest state.
+    for k in [
+        "last_out",
+        "last_inputs",
+        "last_trace",
+        "last_run_id",
+        "last_run_seconds",
+        "retry_requested",
+        "last_handoff_ticket",
+        "handoff_tickets",
+    ]:
+        st.session_state.pop(k, None)
+
+
 def _apply_preset_question() -> None:
     choice = st.session_state.get("preset_choice")
     if choice and choice != "(custom)":
         st.session_state["question_text"] = DEMO_QUESTION_PRESETS.get(choice, "")
+    _clear_last_run()
 
 with left:
     if "question_text" not in st.session_state:
@@ -657,12 +709,30 @@ with left:
         "Ask a homeowners insurance coverage question",
         key="question_text",
         height=90,
+        on_change=_clear_last_run,
     )
 
 with right:
     st.caption("Controls (compliance + transparency)")
-    state = st.selectbox("Jurisdiction / State", ["IL", "CA", "NY", "TX", "FL"], index=0)
-    require_citations = st.checkbox("Require citations (block answers without sources)", value=True)
+
+    if "state" not in st.session_state:
+        st.session_state["state"] = "IL"
+    if "require_citations" not in st.session_state:
+        st.session_state["require_citations"] = True
+
+    state = st.selectbox(
+        "Jurisdiction / State",
+        ["IL", "CA", "NY", "TX", "FL"],
+        index=0,
+        key="state",
+        on_change=_clear_last_run,
+    )
+    require_citations = st.checkbox(
+        "Require citations (block answers without sources)",
+        value=True,
+        key="require_citations",
+        on_change=_clear_last_run,
+    )
     consent = st.checkbox(
         "I confirm I'm using redacted/non-sensitive data.",
         value=False
@@ -678,7 +748,7 @@ with right:
                 "first_contact_resolution_uplift_pct": 12.0,
                 "deflection_rate_pct": 15.0,
                 "escalation_reduction_pct": 10.0,
-                "notes": "Assumptions: common coverage questions; policy packet indexed; agent used for first-pass guidance with citations.",
+                "notes": "Assumptions: common coverage questions; policy packet indexed; used for first-pass guidance with citations.",
             }
 
         m = dict(st.session_state.get("impact_metrics") or {})
@@ -811,6 +881,7 @@ def _render_run(*, out: dict, question: str, state: str, require_citations: bool
         if st.button("Edit question", key=f"editq_{run_id or 'run'}"):
             st.session_state["preset_choice"] = "(custom)"
             st.session_state["question_text"] = question
+            _clear_last_run()
             st.rerun()
     with top_c:
         note_key = f"fb_note_{run_id or 'run'}"
@@ -839,7 +910,7 @@ def _render_run(*, out: dict, question: str, state: str, require_citations: bool
 
     if blocked:
         st.error(
-            "Blocked: The workflow could not retrieve strong enough evidence to answer safely. "
+            "Blocked: Not enough policy evidence was found to answer safely. "
             "Try ingest/indexing more docs or rephrasing the question."
         )
         if validation:
@@ -901,7 +972,7 @@ def _render_run(*, out: dict, question: str, state: str, require_citations: bool
     else:
         st.code(sources)
 
-    st.subheader("Handoff to human agent")
+    st.subheader("Handoff for human review")
     st.caption("Share a structured summary with citations for a human reviewer.")
 
     col_h1, col_h2, col_h3 = st.columns([1, 1, 1])
@@ -956,7 +1027,7 @@ def _render_run(*, out: dict, question: str, state: str, require_citations: bool
         with st.expander("Recent tickets", expanded=False):
             st.json(st.session_state.get("handoff_tickets"))
 
-    with st.expander("Audit trail", expanded=True):
+    with st.expander("Audit log", expanded=True):
         st.caption(
             "This log is for audit and troubleshooting. It does not store full inputs, and it redacts common PII patterns in text previews."
         )
@@ -972,7 +1043,7 @@ def _render_run(*, out: dict, question: str, state: str, require_citations: bool
 
         col1, col2 = st.columns([1, 1])
         with col1:
-            st.markdown("**Workflow steps (trace)**")
+            st.markdown("**Steps (trace)**")
             st.json(trace)
         with col2:
             st.markdown("**Inputs + retrieved matches**")
