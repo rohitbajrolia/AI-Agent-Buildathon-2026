@@ -21,6 +21,9 @@ Coverage answer:
 Key conditions / exclusions to watch:
 - 1-3 bullets. Each bullet ends with citations.
 
+Endorsement override / conflicts (only if relevant):
+- 1-2 short bullets. If endorsements may control, say so and cite the endorsement snippet.
+
 What to verify (to make a real decision):
 - 1-3 bullets. If the docs are missing info, say what's missing.
 
