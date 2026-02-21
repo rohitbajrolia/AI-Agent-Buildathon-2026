@@ -186,7 +186,7 @@ def retrieve_node(state: GraphState) -> GraphState:
         else:
             cite = f'[{r.get("file_name")} | {r.get("doc_type")} | chunk {r.get("chunk_index")}]'
         snippet = (r.get("snippet") or "").replace("\n", " ").strip()
-        # Keep prompts tight; long snippets add latency without helping citations.
+        # Keep this short; long snippets add latency without helping citations.
         if len(snippet) > 360:
             snippet = snippet[:360].rstrip() + "..."
         lines.append(f"- {cite} {snippet}")
@@ -233,7 +233,7 @@ def retrieve_node(state: GraphState) -> GraphState:
 
 def answer_node(state: GraphState) -> GraphState:
     """
-    Node 2: Ask the model to answer using ONLY the retrieved sources.
+    Node 2: Generate an answer using ONLY the retrieved sources.
     """
     question = state["question"]
     state_code = state.get("state", "IL")  # State code for jurisdiction.
@@ -283,8 +283,8 @@ def answer_node(state: GraphState) -> GraphState:
             "- If applicability is unclear (effective date / form / state), call it out under 'What to verify'.\n"
         )
 
-    # Give the model an explicit allow-list of citation tags.
-    # This reduces invented chunk numbers and makes post-verification much more reliable.
+    # Provide an explicit allow-list of citation tags.
+    # This reduces made-up chunk numbers and makes the verification step more reliable.
     allowed_tags: list[str] = []
     for r in raw_results:
         file_name = r.get("file_name")
@@ -338,7 +338,7 @@ def answer_node(state: GraphState) -> GraphState:
         state["answer"] = ""
         state["validation"] = {
             "passed": False,
-            "reasons": ["Model call failed; refusing to show a partial answer.", error],
+            "reasons": ["Answer generation failed; not showing a partial answer.", error],
             "warnings": [],
             "next_actions": ["Confirm OPENAI_API_KEY and network access, then try again."],
             "stats": state.get("validation", {}).get("stats") if isinstance(state.get("validation"), dict) else {},
@@ -455,7 +455,7 @@ def _citation_matches(
     file_name, doc_type, chunk_index, page_number = cite
     if (file_name, doc_type, chunk_index, page_number) in expected:
         return True
-    # If the model omitted a page number, we accept any page for that chunk.
+    # If a page number is missing, we accept any page for that chunk.
     if page_number is None:
         for f, d, c, _p in expected:
             if f == file_name and d == doc_type and c == chunk_index:
@@ -631,7 +631,7 @@ def verify_citations_node(state: GraphState) -> GraphState:
             reasons.append(str(issue))
 
         if not next_actions:
-            next_actions.append("Try asking again; the model sometimes formats citations incorrectly.")
+            next_actions.append("Try asking again; citation formatting can be finicky.")
             next_actions.append("If it keeps failing, re-index and ask a narrower question.")
 
         validation["passed"] = False
@@ -658,7 +658,7 @@ def verify_citations_node(state: GraphState) -> GraphState:
 
 
 def validate_node(state: GraphState) -> GraphState:
-    """Gate the model call when retrieval is clearly insufficient.
+    """Gate the answer step when retrieval is clearly insufficient.
 
     Blocks when matches are missing/weak, and otherwise allows the answer step to run
     while recording the decision in the audit trace.
@@ -779,7 +779,7 @@ def build_graph():
         },
     )
 
-    # We verify citations *after* the model answers, and can still block the run.
+    # We verify citations after the answer is generated, and can still block the run.
     g.add_edge("answer", "citation_verify")
     g.add_edge("citation_verify", END)
 
