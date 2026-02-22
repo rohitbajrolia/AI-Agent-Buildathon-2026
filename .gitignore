@@ -6,6 +6,7 @@ docs/**
 # Allow-list repo-safe docs
 !docs/
 !docs/ARCHITECTURE_FLOW.txt
+!docs/TECHNICAL_FLOW.txt
 
 # Python virtual environments
 .venv/
