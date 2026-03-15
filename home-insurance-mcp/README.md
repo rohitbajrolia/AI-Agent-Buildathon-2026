@@ -26,13 +26,13 @@ Other behavior:
 - Stable chunk IDs and metadata (file, doc type, page, chunk) for citations.
 - Docs-root restriction (folder path must be under the configured docs root).
 - Error redaction so secrets do not leak through stack traces.
-- Handoff tickets are also written to disk under `.demo_state/` when local persistence succeeds.
+- Handoff tickets are persisted best-effort to disk under `.demo_state/` by default.
 
 ## Flow (server side, in order)
 
-1. `health` confirms the server is reachable.
+1. `health` actively checks Qdrant connectivity and returns `status: ok` or `status: degraded`.
 2. `ingest_folder` scans docs, extracts text, and returns file summaries.
-3. `index_folder_qdrant` chunks text, embeds with OpenAI, and upserts to Qdrant.
+3. `index_folder_qdrant` chunks text (with overlap clamped to be strictly less than chunk_size), embeds with OpenAI, and upserts to Qdrant.
 4. `retrieve_clauses` embeds a query and returns top matches with snippets + metadata.
 5. `index_status` reports readiness (Qdrant, collection, OpenAI, OCR).
 
@@ -75,7 +75,7 @@ docker compose up -d
 
 This uses a named Docker volume, so your index survives restarts.
 
-Ad hoc run (not persistent):
+Quick one-off (not persistent):
 
 ```bash
 docker run --rm -p 6333:6333 qdrant/qdrant
@@ -104,6 +104,7 @@ Common options:
 - `QDRANT_URL`, `QDRANT_COLLECTION`
 - `MCP_PORT`, `MCP_HOST`
 - `MCP_DOCS_ROOT` (docs root enforced by the server)
+- `MCP_DEBUG` (default `0` — set to `1` to enable Starlette debug mode and full stack traces)
 - `CHECK_OPENAI_ON_INDEX_STATUS`
 - `OPENAI_INDEX_STATUS_CACHE_SECONDS`
 - `ENABLE_PDF_OCR_FALLBACK`
@@ -136,7 +137,7 @@ bash ./run_server.sh
 Server URL: `http://127.0.0.1:4200/mcp/`.
 If you set `MCP_HOST=0.0.0.0`, the server is reachable on your LAN.
 
-## Sanity Checks
+## Quick sanity checks
 
 Healthy means:
 - `health` returns `status: ok`.

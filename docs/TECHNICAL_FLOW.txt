@@ -1,27 +1,28 @@
-Home Insurance Coverage Review - Technical Flow (Developer Guide)
-=================================================================
+Coverage Concierge - Technical Flow (Developer Guide)
+=====================================================
 
-Read this file start-to-finish once to understand the application end to end. After that, you should be able to:
+For anyone who does not like peace and want to explore this application, read this file start-to-finish once. After that, you should be able to:
 - run the system end-to-end
 - understand how indexing + retrieval + answering work
 - find the exact file that implements each feature
 - extend the MCP tools or the LangGraph workflow safely
 
 
-0) What this application is (and what it is not)
-------------------------------------------------
+0) What this app is (and what it is not) - No lie
+----------------------------------------
 
 What it is:
 - A local-first homeowners insurance Q&A app that answers using only your policy packet (PDFs/images) indexed into Qdrant.
-- It is designed to support auditability: it shows sources, keeps a trace, and can fail closed (block answers) when it cannot defend citations.
+- It is designed to be audit-friendly: it shows sources, keeps a trace, and can fail closed (block answers) when it cannot defend citations.
+- Mixed-LOB aware: questions that touch both homeowners and another line of business (e.g., a storm that damaged a car in the garage) are not blocked outright. The model answers only what the homeowners documents support and defers the rest.
 
-What it is not:
+What it is not, but you still can go with it if you love Tufani stuffs:
 - Not legal advice, underwriting, or a binding coverage decision. The UI shows this disclaimer at the top.
-- Not a general-purpose insurance question-answering system. The prompt rules and validation gates block unsupported answers.
+- Not a general insurance chatbot. The prompt rules and validation gates push it toward: "no evidence, no output".
 
 
-1) Repository layout
---------------------
+1) Repo layout (what lives where - that without rent)
+---------------------------------
 
 Top-level:
 - docker-compose.yml
@@ -50,7 +51,7 @@ Client package:
   - src/client/ui_theme.css
     Optional UI styling loaded by app.py if present.
 
-Local-only state (git-ignored):
+Local-only state (git-ignored), Unless you are really interested in someone's personal....:
 - docs/
   Default docs root for policy PDFs. The server enforces that ingest/index folder paths stay under this root.
 
@@ -58,11 +59,11 @@ Local-only state (git-ignored):
   Small local files written by the UI/server:
   - docs_fingerprint.json (client): used to detect "docs changed" and gate re-indexing
   - feedback.jsonl (client): optional "Helpful / Needs work" clicks from the UI
-  - handoff_tickets.jsonl (server): persisted handoff tickets when local disk writes succeed
+  - handoff_tickets.jsonl (server): best-effort persistence for created handoff tickets
 
 
-2) Technology stack
--------------------
+2) Tech stack (what we use, and why --> almost got bald while choosing and fixing)
+------------------------------------
 
 Runtime / framework:
 - Python 3.12+
@@ -80,19 +81,19 @@ Vector store:
 - Qdrant (Docker)
   Stores embeddings for the indexed policy packet. Retrieval uses semantic search.
 
-Model provider:
+LLM provider:
 - OpenAI Python SDK
-  - server: embeddings (`text-embedding-3-small`) for indexing and query embedding
-  - client: chat completions (`gpt-4.1-mini`) for drafting an answer from retrieved SOURCES
+  - server: embeddings (text-embedding-3-small) for indexing and query embedding
+  - client: chat completions (gpt-4.1-mini) for drafting an answer from retrieved SOURCES
 
 Document parsing / OCR:
 - pypdf (server): PDF text extraction
 - PyMuPDF/fitz + Pillow + pytesseract (server): OCR fallback for scanned PDFs and images
-  OCR fallback is gated by env (`ENABLE_PDF_OCR_FALLBACK`) and runtime availability.
+  OCR fallback is gated by env (ENABLE_PDF_OCR_FALLBACK) and runtime availability.
 
 Config:
 - python-dotenv
-  Both apps load `.env` files locally with override enabled.
+  Both apps load .env files locally with override enabled.
 
 
 3) How you run it (start here)
@@ -109,9 +110,9 @@ Step B - Start MCP server + Streamlit UI
   - starts the MCP server if needed
   - starts Streamlit UI
 
-Manual start:
-- server: run `home-insurance-mcp/src/server/main.py` (it starts Uvicorn/Starlette)
-- client: run Streamlit on `home-insurance-mcp-client/src/client/app.py`
+Manual start (if you love pain):
+- server: run home-insurance-mcp/src/server/main.py (it starts Uvicorn/Starlette)
+- client: run Streamlit on home-insurance-mcp-client/src/client/app.py
 
 
 4) End-to-end technical flow (from click to answer)
@@ -134,7 +135,7 @@ On load:
   - last run outputs (answer, sources, trace, etc.)
 
 Readiness signals:
-- The UI calls server tool `index_status` and uses it to decide if the demo is "ready":
+- The UI calls server tool index_status and uses it to decide if the demo is "ready":
   - Qdrant reachable
   - collection exists and has points
   - OpenAI is configured (and optionally ping-checked)
@@ -151,7 +152,7 @@ Server tools involved:
 Client UI entry points:
 - "Ingest Folder" button
 - "Index to Qdrant" button
-- Optional: "Self-check" panel runs health -> index_status -> sample retrieve
+- Optional: "Self-check (quick)" panel runs health -> index_status -> sample retrieve
 
 File: home-insurance-mcp-client/src/client/app.py
 What the UI does:
@@ -161,12 +162,12 @@ What the UI does:
   - UI polls job_status and updates the progress display
 - Re-index gating:
   - If the Qdrant collection already exists, indexing is disabled unless the user explicitly confirms docs changed.
-  - The client computes a document fingerprint from PDF path + size + mtime and stores it in `.demo_state/docs_fingerprint.json`.
+  - The client computes a lightweight docs fingerprint from PDF path + size + mtime and stores it in .demo_state/docs_fingerprint.json.
 
 File: home-insurance-mcp/src/server/mcp_server.py
 What the server does during indexing:
 - Enforces docs root:
-  - DOCS_ROOT defaults to `<workspace>/docs` (override via `MCP_DOCS_ROOT`)
+  - DOCS_ROOT defaults to <workspace>/docs (override via MCP_DOCS_ROOT)
   - ingest/index folder paths must be under DOCS_ROOT
 
 - Extracts text:
@@ -182,12 +183,13 @@ What the server does during indexing:
 - Chunks text (default settings used by both ingest and index):
   - chunk_size: 1200 chars
   - overlap: 150 chars
+  - overlap is clamped to be strictly less than chunk_size (prevents an infinite loop if bad values are passed)
 
 - Embeds chunks:
   - OpenAI embeddings model: text-embedding-3-small
 
 - Upserts to Qdrant:
-  - Collection name: `QDRANT_COLLECTION` (default: home_insurance_docs)
+  - Collection name: QDRANT_COLLECTION (default: home_insurance_docs)
   - Payload stored per chunk includes:
     - file_name (path relative to the indexed folder)
     - doc_type
@@ -203,7 +205,7 @@ Point IDs are stable UUIDv5 based on a deterministic string:
 4.3 Question answering flow (LangGraph + MCP tools + gating)
 
 Entry point:
-- UI button "Review Coverage" in home-insurance-mcp-client/src/client/app.py
+- UI button "Ask Concierge" in app.py
   This builds a GraphState and calls graph.invoke().
 
 Workflow file:
@@ -213,28 +215,31 @@ GraphState (the data that flows through the nodes):
 - question (required)
 - state (jurisdiction context, default "IL")
 - require_citations (default True)
-- retrieval_plan (redacted previews)
+- retrieval_plan (sub-queries built by the plan node)
 - raw_results (retrieved matches with metadata)
-- sources (the SOURCES block shown in the UI and passed to the model)
+- sources (the SOURCES block shown in UI and passed to the LLM)
 - answer (drafted response)
 - validation + blocked (fail-closed gates)
 - endorsement_signals + precedence_check (override risk signals)
 - trace (audit events)
 
-Node 1: plan
-- Function: plan_retrievals_node()
-- Builds a small retrieval plan (up to ~5 targeted sub-queries):
+Node 1: plan (plan_retrievals_node)
+- Scope gate runs first, before any retrieval or LLM call:
+  - No insurance-domain terms at all: blocked immediately.
+  - Purely another line of business (e.g., "what is my collision deductible?" with no homeowners context): blocked. Message tells the user to load the relevant policy documents.
+  - Mixed-LOB question (e.g., "hailstorm damaged my car in the garage and my roof — what's covered?"): passes through. The model answers only what the homeowners documents support and defers the auto/other portion explicitly.
+- If in scope: builds a retrieval plan of up to 5 targeted sub-queries:
   - Coverage grant
   - Definitions
   - Exclusions / limits
   - Endorsements / changes
   - Conditions / duties (only for certain questions)
-- Stores a redacted version of the plan in state["retrieval_plan"] and logs it to trace.
+- Stores a redacted version of the plan in state and logs it to trace.
 
-Node 2: retrieve (multi-retrieve)
-- Function: multi_retrieve_node()
+Node 2: retrieve (multi_retrieve_node)
+- Executes each sub-query from the retrieval plan.
 - For each plan query:
-  - Calls server tool retrieve_clauses (via client.mcp_client.retrieve_clauses)
+  - Calls server tool retrieve_clauses (via mcp_client.retrieve_clauses)
   - Collects and merges results across topics
 - De-dupes results by a stable key:
   (file_name, doc_type, chunk_index, page_number)
@@ -244,9 +249,8 @@ Node 2: retrieve (multi-retrieve)
     - [file | doc_type | chunk N]
     - [file | doc_type | p. X | chunk N]
 
-Node 3: precedence_check
-- Function: precedence_check_node()
-- Detects simple, defensible endorsement override risk signals:
+Node 3: precedence_check (precedence_check_node)
+- Detects endorsement override risk signals:
   - If retrieved matches include doc_type == "endorsement"
   - And the endorsement snippet includes phrases like "changes the policy", "replaces", "supersedes", etc.
 - Stores:
@@ -254,10 +258,9 @@ Node 3: precedence_check
   - precedence_check (a small summary with override_risk boolean)
 - The UI renders this in the "Endorsement override check" expander.
 
-Node 4: validate (evidence strength gate)
-- Function: validate_node()
+Node 4: validate (validate_node)
 - Only strict when require_citations is True.
-- Blocks early when evidence is clearly too weak to be safe, for example:
+- Blocks early when evidence is clearly too weak:
   - no retrieved matches
   - extremely low top relevance score
   - weak relevance + low diversity (all evidence from one narrow slice)
@@ -267,11 +270,10 @@ Node 4: validate (evidence strength gate)
   - the "Evidence strength" label in the UI
   - the blocked state (with next steps)
 
-Node 5: answer (model draft)
-- Function: answer_node()
+Node 5: answer (answer_node)
 - Uses:
   - home-insurance-mcp-client/src/client/prompts.py (SYSTEM_PROMPT + USER_TEMPLATE)
-  - OpenAI chat completions (model: gpt-4.1-mini)
+  - OpenAI chat completions (model: gpt-4.1-mini, max_tokens: 900)
 - The prompt includes:
   - the user question + state code
   - the SOURCES block
@@ -280,8 +282,7 @@ Node 5: answer (model draft)
   - Builds an explicit allow-list of citation tags derived from retrieved matches.
   - Instructs the model to copy citations only from that allow-list.
 
-Node 6: citation_verify (defensibility gate)
-- Function: verify_citations_node()
+Node 6: citation_verify (verify_citations_node)
 - Only enforced when require_citations is True.
 - It verifies two things:
   1) citations in the answer match the retrieved match keys (file/doc_type/page/chunk)
@@ -294,12 +295,12 @@ Formatting normalization (before verification):
 - Moves citations to the end of required bullets when the model inserts them mid-sentence.
 
 One retry:
-- If verification fails and we have not retried yet, it asks the model once more to fix formatting and use only allowed citation tags.
-- If verification still fails, the run is blocked and the answer is suppressed (answer cleared).
+- If verification fails and we have not retried yet, it asks the model once more to fix formatting and use only allowed citation tags (max_tokens: 700 for retry).
+- If verification still fails, the run is blocked and the answer is suppressed.
 
 
-5) MCP tool contract
---------------------
+5) MCP tool contract (what tools exist and what they return - we all know its surprise)
+------------------------------------------------------------
 
 Server implementation:
 - home-insurance-mcp/src/server/mcp_server.py
@@ -311,7 +312,9 @@ On error, call_tool returns:
 
 Core tools:
 - health
-  Returns basic server status + docs_root.
+  Actively checks Qdrant connectivity via get_collections().
+  Returns status "ok" (Qdrant reachable) or "degraded" (Qdrant unreachable),
+  plus qdrant_reachable, collection_exists, docs_root, docs_root_exists.
 
 - index_status
   Returns readiness signals:
@@ -330,6 +333,7 @@ Core tools:
   Indexes supported files under the folder:
   - PDF and common image types
   - chunks + embeddings + upsert to Qdrant
+  - overlap is clamped to be strictly less than chunk_size
 
 - retrieve_clauses
   Semantic search over indexed chunks:
@@ -351,18 +355,18 @@ Job tools:
 Handoff tools:
 - create_handoff_ticket
   Takes question/state/answer/sources and optional redacted match summaries.
-  Stores in memory and appends to `.demo_state/handoff_tickets.jsonl` when local persistence succeeds.
+  Stores in memory and appends best-effort to .demo_state/handoff_tickets.jsonl.
 
 - list_handoff_tickets
   Returns recent stored tickets.
 
 Utility tool:
 - normalize_quote_snapshot
-  Normalization of pasted quote/rating text into key fields.
+  Lightweight normalization of pasted quote/rating text into key fields.
 
 
-6) UI outputs
--------------
+6) UI outputs: what the user can see / download (if they have cloud storage backup)
+-----------------------------------------------
 
 File: home-insurance-mcp-client/src/client/app.py
 
@@ -381,10 +385,10 @@ Other UI features:
 - Impact snapshot JSON download (manual inputs for demo/pilot assumptions)
 
 
-7) Configuration
-----------------
+7) Configuration (env vars and where they are read -- be cautious, ssshh its very secret)
+---------------------------------------------------
 
-Server `.env`:
+Server .env:
 - home-insurance-mcp/.env
 Loaded in: home-insurance-mcp/src/server/mcp_server.py
 
@@ -395,12 +399,13 @@ Common server env vars:
 - MCP_HOST (default 127.0.0.1)
 - MCP_PORT (default 4200)
 - MCP_DOCS_ROOT (default <workspace>/docs)
+- MCP_DEBUG (default 0 - set to 1 to enable Starlette debug mode and stack traces)
 - ENABLE_PDF_OCR_FALLBACK (default 1)
 - CHECK_OPENAI_ON_INDEX_STATUS (default 1)
 - OPENAI_INDEX_STATUS_CACHE_SECONDS (default 60)
 - MCP_TICKETS_STORE (default .demo_state/handoff_tickets.jsonl)
 
-Client `.env`:
+Client .env:
 - home-insurance-mcp-client/.env
 Loaded in:
 - home-insurance-mcp-client/src/client/mcp_client.py
@@ -409,6 +414,8 @@ Loaded in:
 Common client env vars:
 - MCP_SERVER_URL (default http://127.0.0.1:4200/mcp/)
 - OPENAI_API_KEY
+- STRICT_LINE_OF_BUSINESS_GATE (default 1 - set to 0 to disable the auto LOB block)
+- RETRIEVE_SCORE_THRESHOLD (default 0.55)
 
 
 8) Extension points (where to add features safely)
@@ -416,7 +423,7 @@ Common client env vars:
 
 Add a new server tool:
 - home-insurance-mcp/src/server/mcp_server.py
-  - Add a new `if name == "<tool_name>":` block in _call_tool_impl
+  - Add a new "if name == '<tool_name>':" block in _call_tool_impl
   - Add a matching Tool schema in list_tools()
   - Keep outputs JSON and errors redacted
 
@@ -428,17 +435,23 @@ Add a new workflow step:
 
 Change answer format or citation rules:
 - home-insurance-mcp-client/src/client/prompts.py (format rules)
-- home-insurance-mcp-client/src/client/graph.py (verification logic)
+- home-insurance-mcp-client/src/client/graph.py (verification logic in verify_citations_node)
   Keep these two in sync. The whole "defensible output" behavior depends on it.
 
+Change scope gate behavior:
+- home-insurance-mcp-client/src/client/graph.py
+  - _scope_gate() controls what gets blocked vs passed through
+  - _HOMEOWNERS_ADJACENT_KEYWORDS controls what counts as a mixed-LOB question
+  - STRICT_LINE_OF_BUSINESS_GATE env var enables/disables the auto LOB block
 
-9) Implementation lookup
-------------------------
+
+9) Quick "where is this implemented?" lookup
+---------------------------------------------
 
 UI + guardrails + downloads:
 - home-insurance-mcp-client/src/client/app.py
 
-Workflow + gating:
+Workflow + gating + scope gate:
 - home-insurance-mcp-client/src/client/graph.py
 
 Prompt + output structure:

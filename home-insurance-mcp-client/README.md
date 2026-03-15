@@ -7,7 +7,8 @@ This is the client app. It runs a Streamlit UI and a LangGraph workflow that cal
 - Streamlit UI for evidence-backed Q&A and controls.
 - LangGraph pipeline:
   `plan -> retrieve -> precedence_check -> validate -> answer -> citation_verify`
-- Audit trail with redacted previews and a downloadable JSON trace.
+  The plan node runs a scope gate before retrieval. The retrieve node runs multiple targeted sub-queries per plan topic, then merges and de-dupes results.
+- Audit trail with redacted previews and a one-click JSON download.
 - Manual ingest/index controls and a readiness indicator.
 - Job-based ingest/index with progress bars (polls job status).
 - Re-index gating: if the index already exists, re-indexing is disabled unless you confirm docs changed.
@@ -17,11 +18,11 @@ This is the client app. It runs a Streamlit UI and a LangGraph workflow that cal
 
 ## Flow (client side, in order)
 
-1. Sidebar -> Self-check to confirm `health`, `index_status`, and (if ready) a small `retrieve_clauses` call.
+1. Sidebar -> Self-check (quick) to confirm `health`, `index_status`, and (if ready) a small `retrieve_clauses` call.
 2. Sidebar -> Refresh Index Status to see whether indexing is needed.
 3. If the collection is missing or empty, run Index to Qdrant.
 4. If the collection already exists, indexing is skipped unless you check "I added/updated documents - re-index".
-5. Click Review Coverage. The workflow runs:
+5. Click Ask Concierge. The workflow runs:
    `plan -> retrieve -> precedence_check -> validate -> answer -> citation_verify`
 6. The UI shows the answer, sources, and audit trace, or blocks the run if evidence is weak or citations are invalid.
 
@@ -30,8 +31,9 @@ This is the client app. It runs a Streamlit UI and a LangGraph workflow that cal
 - Privacy: the UI warns against PII and defaults to redacted snippets in the audit views.
 - Readiness: Q&A is disabled until the index is ready and OpenAI looks healthy (from `index_status`).
 - Consent: Q&A is disabled until the user confirms they are using redacted data.
+- Scope gate: purely out-of-scope or wrong-LOB questions are blocked before any retrieval. Mixed-LOB questions pass through; the model answers only what the loaded documents support and defers the rest.
 - Grounding: answers are instructed to use only the provided SOURCES.
-- Verification: when "Require citations" is on, citations are checked against retrieved chunks; invalid citations are rejected and the run can be blocked.
+- Verification: when "Require citations" is on, citations are checked against retrieved chunks; invalid citations trigger one retry, then the run is blocked.
 - The UI shows an always-on disclaimer: educational use only; not legal advice, underwriting, or a binding coverage decision.
 
 ## Prereqs
@@ -79,7 +81,7 @@ cd /c/AI-Agent-Buildathon-2026
 bash ./run_ui.sh
 ```
 
-For a single-command launcher that starts the MCP server and then the UI:
+For a one-command launcher that starts the MCP server and then the UI:
 
 ```bash
 cd /c/AI-Agent-Buildathon-2026
@@ -108,14 +110,14 @@ Good looks like this:
 - `client_smoke.py` shows `openai_ok: true` and a non-zero `points_count`
 - `graph_smoke.py` exits `0`
 
-## Walkthrough
+## Quick walkthrough
 
-1. Sidebar -> Self-check -> Run self-check.
+1. Sidebar -> Self-check (quick) -> Run self-check.
 2. Sidebar -> Refresh Index Status.
 3. If not indexed yet: run Index to Qdrant.
 4. If indexed already: only re-index after changing docs (check "I added/updated documents - re-index").
 5. Optional: Ingest Folder (verifies docs are found and shows progress).
-6. Pick a question preset and run it.
+6. Pick a Quick question preset and ask.
 7. Open Audit log and download the JSON trace.
 8. Optional: Create a handoff ticket and download it.
 
