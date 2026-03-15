@@ -26,7 +26,7 @@ Other behavior:
 - Stable chunk IDs and metadata (file, doc type, page, chunk) for citations.
 - Docs-root restriction (folder path must be under the configured docs root).
 - Error redaction so secrets do not leak through stack traces.
-- Handoff tickets are persisted best-effort to disk under `.demo_state/` by default.
+- Handoff tickets are also written to disk under `.demo_state/` when local persistence succeeds.
 
 ## Flow (server side, in order)
 
@@ -75,7 +75,7 @@ docker compose up -d
 
 This uses a named Docker volume, so your index survives restarts.
 
-Quick one-off (not persistent):
+Ad hoc run (not persistent):
 
 ```bash
 docker run --rm -p 6333:6333 qdrant/qdrant
@@ -136,7 +136,7 @@ bash ./run_server.sh
 Server URL: `http://127.0.0.1:4200/mcp/`.
 If you set `MCP_HOST=0.0.0.0`, the server is reachable on your LAN.
 
-## Quick sanity checks
+## Sanity Checks
 
 Healthy means:
 - `health` returns `status: ok`.

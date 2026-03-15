@@ -1,27 +1,27 @@
-Coverage Concierge - Technical Flow (Developer Guide)
-=====================================================
+Home Insurance Coverage Review - Technical Flow (Developer Guide)
+=================================================================
 
-For anyone  who does not like peace and want to explore this application, read this file start-to-finish once. After that, how you should be able to screw your brain :
+Read this file start-to-finish once to understand the application end to end. After that, you should be able to:
 - run the system end-to-end
 - understand how indexing + retrieval + answering work
 - find the exact file that implements each feature
 - extend the MCP tools or the LangGraph workflow safely
 
 
-0) What this app is (and what it is not)- No lie
-----------------------------------------
+0) What this application is (and what it is not)
+------------------------------------------------
 
 What it is:
 - A local-first homeowners insurance Q&A app that answers using only your policy packet (PDFs/images) indexed into Qdrant.
-- It is designed to be "audit-friendly" (this term sucks): it shows sources, keeps a trace, and can fail closed (block answers) when it cannot defend citations.
+- It is designed to support auditability: it shows sources, keeps a trace, and can fail closed (block answers) when it cannot defend citations.
 
-What it is not, but you still can go with it if you love Tufani stuffs:
+What it is not:
 - Not legal advice, underwriting, or a binding coverage decision. The UI shows this disclaimer at the top.
-- Not a general insurance chatbot. The prompt rules and validation gates push it toward: "no evidence, no output".
+- Not a general-purpose insurance question-answering system. The prompt rules and validation gates block unsupported answers.
 
 
-1) Repo layout (what lives where- that without rent)
----------------------------------
+1) Repository layout
+--------------------
 
 Top-level:
 - docker-compose.yml
@@ -50,7 +50,7 @@ Client package:
   - src/client/ui_theme.css
     Optional UI styling loaded by app.py if present.
 
-Local-only state (git-ignored), Unless you are really interested in someone's personal.... :
+Local-only state (git-ignored):
 - docs/
   Default docs root for policy PDFs. The server enforces that ingest/index folder paths stay under this root.
 
@@ -58,11 +58,11 @@ Local-only state (git-ignored), Unless you are really interested in someone's pe
   Small local files written by the UI/server:
   - docs_fingerprint.json (client): used to detect "docs changed" and gate re-indexing
   - feedback.jsonl (client): optional "Helpful / Needs work" clicks from the UI
-  - handoff_tickets.jsonl (server): best-effort persistence for created handoff tickets
+  - handoff_tickets.jsonl (server): persisted handoff tickets when local disk writes succeed
 
 
-2) Tech stack (what we use, and why --> almost got bald while choosing and fixing)
-------------------------------------
+2) Technology stack
+-------------------
 
 Runtime / framework:
 - Python 3.12+
@@ -80,7 +80,7 @@ Vector store:
 - Qdrant (Docker)
   Stores embeddings for the indexed policy packet. Retrieval uses semantic search.
 
-LLM provider:
+Model provider:
 - OpenAI Python SDK
   - server: embeddings (`text-embedding-3-small`) for indexing and query embedding
   - client: chat completions (`gpt-4.1-mini`) for drafting an answer from retrieved SOURCES
@@ -109,7 +109,7 @@ Step B - Start MCP server + Streamlit UI
   - starts the MCP server if needed
   - starts Streamlit UI
 
-Manual start (if you love pain):
+Manual start:
 - server: run `home-insurance-mcp/src/server/main.py` (it starts Uvicorn/Starlette)
 - client: run Streamlit on `home-insurance-mcp-client/src/client/app.py`
 
@@ -151,7 +151,7 @@ Server tools involved:
 Client UI entry points:
 - "Ingest Folder" button
 - "Index to Qdrant" button
-- Optional: "Self-check (quick)" panel runs health -> index_status -> sample retrieve
+- Optional: "Self-check" panel runs health -> index_status -> sample retrieve
 
 File: home-insurance-mcp-client/src/client/app.py
 What the UI does:
@@ -161,7 +161,7 @@ What the UI does:
   - UI polls job_status and updates the progress display
 - Re-index gating:
   - If the Qdrant collection already exists, indexing is disabled unless the user explicitly confirms docs changed.
-  - The client computes a lightweight docs fingerprint from PDF path + size + mtime and stores it in `.demo_state/docs_fingerprint.json`.
+  - The client computes a document fingerprint from PDF path + size + mtime and stores it in `.demo_state/docs_fingerprint.json`.
 
 File: home-insurance-mcp/src/server/mcp_server.py
 What the server does during indexing:
@@ -203,7 +203,7 @@ Point IDs are stable UUIDv5 based on a deterministic string:
 4.3 Question answering flow (LangGraph + MCP tools + gating)
 
 Entry point:
-- UI button "Ask Concierge" in home-insurance-mcp-client/src/client/app.py
+- UI button "Review Coverage" in home-insurance-mcp-client/src/client/app.py
   This builds a GraphState and calls graph.invoke().
 
 Workflow file:
@@ -215,7 +215,7 @@ GraphState (the data that flows through the nodes):
 - require_citations (default True)
 - retrieval_plan (redacted previews)
 - raw_results (retrieved matches with metadata)
-- sources (the SOURCES block shown in UI and passed to the LLM)
+- sources (the SOURCES block shown in the UI and passed to the model)
 - answer (drafted response)
 - validation + blocked (fail-closed gates)
 - endorsement_signals + precedence_check (override risk signals)
@@ -267,7 +267,7 @@ Node 4: validate (evidence strength gate)
   - the "Evidence strength" label in the UI
   - the blocked state (with next steps)
 
-Node 5: answer (LLM draft)
+Node 5: answer (model draft)
 - Function: answer_node()
 - Uses:
   - home-insurance-mcp-client/src/client/prompts.py (SYSTEM_PROMPT + USER_TEMPLATE)
@@ -280,7 +280,7 @@ Node 5: answer (LLM draft)
   - Builds an explicit allow-list of citation tags derived from retrieved matches.
   - Instructs the model to copy citations only from that allow-list.
 
-Node 6: citation_verify (defensibility gate ----ARMY  style)
+Node 6: citation_verify (defensibility gate)
 - Function: verify_citations_node()
 - Only enforced when require_citations is True.
 - It verifies two things:
@@ -298,8 +298,8 @@ One retry:
 - If verification still fails, the run is blocked and the answer is suppressed (answer cleared).
 
 
-5) MCP tool contract (what tools exist and what they return---> we all know  its surprise)
-------------------------------------------------------------
+5) MCP tool contract
+--------------------
 
 Server implementation:
 - home-insurance-mcp/src/server/mcp_server.py
@@ -351,18 +351,18 @@ Job tools:
 Handoff tools:
 - create_handoff_ticket
   Takes question/state/answer/sources and optional redacted match summaries.
-  Stores in memory and appends best-effort to `.demo_state/handoff_tickets.jsonl`.
+  Stores in memory and appends to `.demo_state/handoff_tickets.jsonl` when local persistence succeeds.
 
 - list_handoff_tickets
   Returns recent stored tickets.
 
 Utility tool:
 - normalize_quote_snapshot
-  Lightweight normalization of pasted quote/rating text into key fields.
+  Normalization of pasted quote/rating text into key fields.
 
 
-6) UI outputs: what the user can see / download(if they have cloud storage backup)
------------------------------------------------
+6) UI outputs
+-------------
 
 File: home-insurance-mcp-client/src/client/app.py
 
@@ -381,8 +381,8 @@ Other UI features:
 - Impact snapshot JSON download (manual inputs for demo/pilot assumptions)
 
 
-7) Configuration (env vars and where they are read -- be cautious, ssshh its very secret)
----------------------------------------------------
+7) Configuration
+----------------
 
 Server `.env`:
 - home-insurance-mcp/.env
@@ -432,8 +432,8 @@ Change answer format or citation rules:
   Keep these two in sync. The whole "defensible output" behavior depends on it.
 
 
-9) Quick "where is this implemented?" lookup
----------------------------------------------
+9) Implementation lookup
+------------------------
 
 UI + guardrails + downloads:
 - home-insurance-mcp-client/src/client/app.py
@@ -458,4 +458,3 @@ Qdrant container:
 
 One-command demo runner:
 - run_demo.sh
-

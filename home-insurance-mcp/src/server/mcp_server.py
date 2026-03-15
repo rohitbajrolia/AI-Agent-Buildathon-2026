@@ -55,7 +55,7 @@ qdrant = QdrantClient(url=QDRANT_URL, check_compatibility=False)
 
 
 # -----------------------------
-# Simple in-memory job tracker
+# In-memory job tracker
 # (start job -> poll status)
 # -----------------------------
 
@@ -75,7 +75,7 @@ def _tickets_store_append(record: dict) -> None:
         with _TICKETS_STORE_PATH.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
-        # Persistence is best-effort; if disk write fails, we still keep going.
+        # Continue processing even if local ticket persistence fails.
         return
 
 
@@ -557,21 +557,24 @@ def chunk_text(text: str, chunk_size: int = 1200, overlap: int = 150) -> list[st
     chunk_size and overlap are a trade-off:
     - bigger chunks = fewer embeddings but less precise citations
     - overlap helps preserve context across boundaries
+
+    overlap must be less than chunk_size, otherwise start never moves forward.
     """
     text = text or ""
     if not text.strip():
         return []
+
+    chunk_size = max(1, int(chunk_size))
+    overlap = max(0, min(int(overlap), chunk_size - 1))
 
     chunks = []
     start = 0
     while start < len(text):
         end = min(len(text), start + chunk_size)
         chunks.append(text[start:end])
-        start = end - overlap  # move back a bit to overlap
-        if start < 0:
-            start = 0
         if end == len(text):
             break
+        start = end - overlap
     return chunks
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
@@ -610,11 +613,26 @@ async def _call_tool_impl(name: str, arguments: dict) -> list[types.TextContent]
     This is the switchboard: tool calls come in by `name` with JSON `arguments`.
     """
     if name == "health":
+        qdrant_ok = False
+        qdrant_error: str | None = None
+        collection_exists: bool | None = None
+        try:
+            collections = qdrant.get_collections().collections
+            qdrant_ok = True
+            collection_exists = QDRANT_COLLECTION in {c.name for c in collections}
+        except Exception as e:
+            qdrant_error = _redact_error_text(e)
+
+        overall_status = "ok" if qdrant_ok else "degraded"
         payload = {
-            "status": "ok",
+            "status": overall_status,
             "server": "home-insurance-mcp",
             "unix_time": int(time.time()),
-            "note": "MCP server running (streamable HTTP, stateless)",
+            "qdrant_ok": qdrant_ok,
+            "qdrant_error": qdrant_error,
+            "collection": QDRANT_COLLECTION,
+            "collection_exists": collection_exists,
+            "openai_configured": bool(OPENAI_API_KEY),
             "docs_root": str(DOCS_ROOT),
             "docs_root_exists": DOCS_ROOT.exists(),
         }
@@ -908,7 +926,7 @@ async def _call_tool_impl(name: str, arguments: dict) -> list[types.TextContent]
             except Exception as e:
                 errors.append({"file_name": str(p.relative_to(folder_path)).replace("\\", "/"), "error": _redact_error_text(e)})
 
-        # Upsert in batches (fast + avoids huge request)
+        # Upsert in batches to limit request size.
         batch_size = 64
         for start in range(0, len(all_points), batch_size):
             qdrant.upsert(
@@ -948,6 +966,7 @@ async def _call_tool_impl(name: str, arguments: dict) -> list[types.TextContent]
             query=qvec[0],
             limit=top_k,
             query_filter=query_filter,
+            score_threshold=float(arguments.get("score_threshold", 0.0)) or None,
         )
         hits = query_resp.points
         results = []
@@ -1208,6 +1227,7 @@ async def list_tools() -> list[types.Tool]:
                     "top_k": {"type": "integer", "default": 5},
                     "doc_type": {"type": "string", "description": "Optional filter: declarations/endorsement/policy_booklet/unknown"},
                     "file_name": {"type": "string", "description": "Optional filter by file name"},
+                    "score_threshold": {"type": "number", "description": "Optional minimum cosine similarity score; results below this are dropped."},
                 },
                 "required": ["query"],
                 "additionalProperties": False,
@@ -1221,7 +1241,7 @@ async def list_tools() -> list[types.Tool]:
 
         types.Tool(
             name="create_handoff_ticket",
-            description="Create a lightweight handoff ticket (in-memory) containing question, answer, and citations for human review.",
+            description="Create an in-memory handoff ticket containing question, answer, and citations for human review.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1280,7 +1300,7 @@ async def lifespan(starlette_app: Starlette) -> AsyncIterator[None]:
 
 
 starlette_app = Starlette(
-    debug=True,
+    debug=os.environ.get("MCP_DEBUG", "0").strip().lower() in {"1", "true", "yes"},
     routes=[Mount("/mcp", app=handle_streamable_http)],
     lifespan=lifespan,
 )

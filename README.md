@@ -1,6 +1,6 @@
-# Home Insurance Coverage Concierge (MCP + Qdrant + Streamlit)
+# Home Insurance Coverage Review (MCP + Qdrant + Streamlit)
 
-Coverage Concierge is a local-first homeowners insurance Q&A assistant. You point it at a folder of policy documents (policy booklet, declarations, endorsements, notices). It indexes them into Qdrant and answers questions using only retrieved snippets from that packet.
+This project is a local-first homeowners insurance Q&A workflow. Point it at a folder of policy documents (policy booklet, declarations, endorsements, notices), index them into Qdrant, and answer questions using only retrieved snippets from that packet.
 
 It runs as three parts:
 - Qdrant (Docker): persistent vector index for retrieval
@@ -12,9 +12,9 @@ It runs as three parts:
 - Evidence-backed Q&A with citations tied to retrieved policy snippets.
 - Explicit ingest and index steps so you control when docs are processed.
 - Fail-closed mode: when citations are required, answers are blocked unless sources are present and citations verify.
-- Planned multi-retrieve (not just one search): the workflow breaks the question into retrieval topics, runs multiple retrieval calls, then dedupes/merges evidence.
+- Planned multi-stage retrieval: the workflow breaks the question into retrieval topics, runs multiple retrieval calls, then dedupes and merges evidence.
 - Endorsement precedence signals: retrieved endorsements are surfaced as potential overrides and flagged for verification.
-- Audit trail: retrieval plan, evidence summary, precedence signals, and a one-click JSON download.
+- Audit trail: retrieval plan, evidence summary, precedence signals, and a downloadable JSON trace.
 - Redacted snippet previews by default (with an explicit local-only toggle to view unredacted).
 - Handoff tickets: generate a structured "send to a human reviewer" payload with citations.
 - Optional utilities in the UI: quote/rating normalization, and an "impact snapshot" JSON export.
@@ -25,10 +25,10 @@ It runs as three parts:
 1. Start Qdrant (vector DB). It stores embeddings so retrieval is fast and persistent across restarts.
 2. Start the MCP server. It exposes tools like `health`, `ingest_folder`, `index_folder_qdrant`, `retrieve_clauses`, and `index_status`.
 3. Start the Streamlit UI. The UI calls MCP tools and runs the LangGraph workflow.
-4. (Optional) Run the sidebar "Self-check (quick)". It validates `health`, `index_status`, and a small retrieval call when the index is ready.
+4. (Optional) Run the sidebar "Self-check". It validates `health`, `index_status`, and a small retrieval call when the index is ready.
 5. Ingest Folder (UI button). The server scans PDFs/images under your docs folder, extracts text (with OCR fallback for scanned pages when enabled), and returns file summaries. No embeddings yet.
 6. Index to Qdrant (UI button). The server chunks text, generates embeddings, and upserts them to Qdrant in batches. The index status becomes ready.
-7. Ask Concierge (UI button). The workflow runs:
+7. Review Coverage (UI button). The workflow runs:
    `plan -> retrieve -> precedence_check -> validate -> answer -> citation_verify`
    If evidence is weak or citations are invalid, the run is blocked. Otherwise the UI shows the answer, sources, and an audit trace download.
 
@@ -41,7 +41,7 @@ Docs folder note (important):
 
 ## UI guardrails (exact behavior)
 
-- "Ask Concierge" is disabled until all conditions are true:
+- "Review Coverage" is disabled until all conditions are true:
   - Index is ready (Qdrant collection exists and has points; index status is OK)
   - OpenAI is configured and looks healthy (from `index_status`)
   - You check: "I confirm I'm using redacted/non-sensitive data."
@@ -99,7 +99,7 @@ Ports (defaults):
 - MCP server: `4200`
 - Streamlit UI: `8501`
 
-## Quick start (Windows)
+## Getting Started (Windows)
 
 ### 0) Start Qdrant (persistent)
 

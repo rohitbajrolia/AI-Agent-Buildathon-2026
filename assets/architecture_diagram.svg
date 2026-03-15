@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
   <defs>
     <style>
       .bg { fill: #ffffff; }
@@ -21,7 +21,7 @@
     </marker>
   </defs>
 
-  <rect class="bg" x="0" y="0" width="1200" height="560" />
+  <rect class="bg" x="0" y="0" width="1200" height="720" />
 
   <!-- Left: Documents -->
   <rect class="box" x="60" y="210" width="250" height="140" />
@@ -54,33 +54,33 @@
   <text class="muted" x="760" y="213">ingest, index, retrieve, status</text>
 
   <!-- Right: Qdrant -->
-  <rect class="box" x="740" y="330" width="180" height="150" />
-  <rect class="accent" x="740" y="330" width="180" height="10" />
-  <text class="title" x="760" y="375">Qdrant</text>
-  <text class="muted" x="760" y="405">Vectors + metadata</text>
-  <text class="muted" x="760" y="427">Persistent volume</text>
+  <rect class="box" x="900" y="330" width="180" height="150" />
+  <rect class="accent" x="900" y="330" width="180" height="10" />
+  <text class="title" x="920" y="375">Qdrant</text>
+  <text class="muted" x="920" y="405">Vectors + metadata</text>
+  <text class="muted" x="920" y="427">Persistent volume</text>
 
   <!-- Right: LLM provider -->
-  <rect class="box" x="940" y="330" width="180" height="150" />
-  <rect class="accent" x="940" y="330" width="180" height="10" />
-  <text class="title" x="960" y="375">OpenAI</text>
-  <text class="muted" x="960" y="405">Embeddings</text>
-  <text class="muted" x="960" y="427">Answer generation</text>
+  <rect class="box" x="900" y="520" width="180" height="150" />
+  <rect class="accent" x="900" y="520" width="180" height="10" />
+  <text class="title" x="920" y="565">OpenAI</text>
+  <text class="muted" x="920" y="595">Embeddings</text>
+  <text class="muted" x="920" y="617">Answer generation</text>
 
   <!-- Arrows -->
   <path class="arrow" d="M310 280 L360 280" />
   <path class="arrow" d="M525 230 L525 280" />
   <path class="arrowAccent" d="M690 160 L740 160" />
-  <path class="arrowAccent" d="M690 360 L740 360" />
-  <path class="arrow" d="M920 405 L940 405" />
+  <path class="arrowAccent" d="M690 360 L900 360" />
+  <path class="arrow" d="M990 480 L990 520" />
 
   <!-- Labels on arrows -->
   <text class="muted" x="325" y="265">ingest</text>
   <text class="muted" x="535" y="265">run</text>
   <text class="muted" x="705" y="145">tools</text>
-  <text class="muted" x="705" y="345">index/retrieve</text>
-  <text class="muted" x="922" y="392">embed</text>
+  <text class="muted" x="780" y="345">index/retrieve</text>
+  <text class="muted" x="1002" y="505">embed</text>
 
   <!-- Footer note -->
-  <text class="muted" x="60" y="525">Coverage Concierge - components and data flow</text>
+  <text class="muted" x="60" y="685">Coverage Concierge - components and data flow</text>
 </svg>
