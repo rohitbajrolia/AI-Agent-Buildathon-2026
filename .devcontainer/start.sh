@@ -17,8 +17,7 @@ QDRANT_URL=http://localhost:6333
 if curl -fsS --max-time 2 "$QDRANT_URL/healthz" >/dev/null 2>&1; then
   echo "Qdrant is already running."
 else
-  nohup "$QDRANT_BIN" \
-    --storage-path "$QDRANT_STORAGE" \
+  nohup env QDRANT__STORAGE__STORAGE_PATH="$QDRANT_STORAGE" "$QDRANT_BIN" \
     > /tmp/qdrant.log 2>&1 &
   echo "Waiting for Qdrant to start..."
   for i in {1..20}; do
