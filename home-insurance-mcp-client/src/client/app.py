@@ -829,6 +829,18 @@ def _apply_preset_question() -> None:
 
 
 with st.sidebar:
+    # ── Product scope and decision boundary ──────────────────────────────────
+    st.markdown("#### Coverage Concierge")
+    st.info(
+        "**Scope:** Homeowners insurance policy review — answers grounded in indexed "
+        "policy documents only.\n\n"
+        "**This tool does not make:** coverage decisions, claims determinations, "
+        "underwriting recommendations, or policy binding decisions. "
+        "All real coverage, claims, and binding decisions require qualified human review."
+    )
+    st.divider()
+    # ─────────────────────────────────────────────────────────────────────────
+
     last_health = st.session_state.get("last_health")
     index_status_payload = st.session_state.get("index_status")
     last_ingest = st.session_state.get("last_ingest")
@@ -928,6 +940,31 @@ with st.sidebar:
             st.warning("Almost ready - confirm you are using redacted/non-sensitive data.")
         else:
             st.warning("Not ready yet")
+
+    # ── Active policy context ─────────────────────────────────────────────────
+    with st.expander("Active policy context", expanded=True):
+        _ctx_points = (index_status_payload or {}).get("points_count")
+        _ctx_collection = (index_status_payload or {}).get("collection") or "home_insurance_docs"
+        _ctx_files = (last_ingest or {}).get("files_total") or (last_index or {}).get("files_processed")
+        _ctx_chunks = (last_index or {}).get("chunks_indexed") or _ctx_points
+
+        if index_ready:
+            st.success("Documents indexed — ready for retrieval")
+            _ctx_lines = [
+                f"**Line of business:** Homeowners",
+                f"**Folder:** `{docs_dir_sidebar}`",
+            ]
+            if _ctx_files:
+                _ctx_lines.append(f"**Documents loaded:** {_ctx_files}")
+            if _ctx_chunks:
+                _ctx_lines.append(f"**Indexed chunks:** {_ctx_chunks}")
+            _ctx_lines.append(f"**Collection:** `{_ctx_collection}`")
+            st.markdown("\n\n".join(_ctx_lines))
+            st.caption("Answers are grounded in these documents only. Re-index if documents change.")
+        else:
+            st.warning("No documents indexed. Complete the setup checklist above.")
+            st.caption("Until documents are indexed, the assistant cannot answer policy questions.")
+    # ─────────────────────────────────────────────────────────────────────────
 
     with st.expander("Local policy documents + chunking settings", expanded=docs_step_active):
         st.caption("Use this section to choose local policy documents and how the app chunks them for retrieval.")
@@ -1507,7 +1544,14 @@ with right:
         key="require_citations",
         on_change=_clear_last_run,
     )
-    st.caption("Citations verify source grounding; scope checks still block non-homeowners topics.")
+    if not require_citations:
+        st.warning(
+            "Citations are disabled. In this mode the model may draw on general knowledge "
+            "in addition to indexed policy documents. Enable citations to enforce strict "
+            "document-grounded answers."
+        )
+    else:
+        st.caption("Citations verify source grounding; scope checks still block non-homeowners topics.")
     if setup_current_step == "consent":
         st.warning("Next step: check the confirmation box below to continue.")
     elif setup_current_step == "ask":
@@ -1715,6 +1759,35 @@ def _render_run(*, out: dict, question: str, state: str, require_citations: bool
         st.subheader("What was retrieved")
         st.code(sources or "(no sources found)")
         _render_next_steps(status_payload=status_payload)
+
+        st.divider()
+        st.markdown("**Escalate for human review**")
+        st.caption(
+            "If this question requires a coverage determination or cannot be answered "
+            "from the current documents, create a handoff ticket for a qualified reviewer."
+        )
+        if st.button("Create escalation ticket", type="primary", key=f"escalate_{run_id or 'blocked'}"):
+            try:
+                _esc_matches = _sanitize_retrieved_matches_for_audit(raw_results or [])
+                _esc_payload = _run(
+                    mcp_client.create_handoff_ticket(
+                        question=question,
+                        state=state,
+                        answer="[Blocked — escalated for human review]",
+                        sources=sources or "(no sources found)",
+                        run_id=run_id,
+                        retrieved_matches=_esc_matches,
+                        notes="Escalated from a blocked run. Human reviewer to assess question and policy context.",
+                    )
+                )
+                _esc_ticket_id = (_esc_payload or {}).get("ticket_id")
+                if _esc_ticket_id:
+                    st.success(f"Escalation ticket created: {_esc_ticket_id}")
+                else:
+                    st.success("Escalation ticket created.")
+            except Exception as _esc_err:
+                st.error(f"Could not create escalation ticket: {_esc_err}")
+
         return
 
     st.subheader("Answer (with sources)")
