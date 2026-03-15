@@ -1,0 +1,41 @@
+{
+  "name": "Home Insurance Concierge",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+
+  "forwardPorts": [8501, 4200, 6333],
+  "portsAttributes": {
+    "8501": {
+      "label": "Streamlit UI",
+      "onAutoForward": "openBrowser"
+    },
+    "4200": {
+      "label": "MCP Server",
+      "onAutoForward": "silent"
+    },
+    "6333": {
+      "label": "Qdrant",
+      "onAutoForward": "silent"
+    }
+  },
+
+  "containerEnv": {
+    "QDRANT_URL": "http://localhost:6333",
+    "MCP_HOST": "0.0.0.0",
+    "MCP_PORT": "4200",
+    "MCP_SERVER_URL": "http://localhost:4200/mcp/",
+    "QDRANT_COLLECTION": "home_insurance_docs",
+    "ENABLE_PDF_OCR_FALLBACK": "0",
+    "CHECK_OPENAI_ON_INDEX_STATUS": "1"
+  },
+
+  "secrets": {
+    "OPENAI_API_KEY": {
+      "description": "Your OpenAI API key — required for embeddings and answers.",
+      "documentationUrl": "https://platform.openai.com/api-keys"
+    }
+  },
+
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+
+  "remoteUser": "vscode"
+}
