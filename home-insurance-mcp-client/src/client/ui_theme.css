@@ -170,3 +170,9 @@ header[data-testid="stHeader"] {
   background: rgba(14, 14, 16, 0.85);
   border-bottom: 1px solid var(--border);
 }
+
+/* Hide Streamlit's built-in exception helper actions in the product UI */
+div[data-testid="stException"] a,
+div[data-testid="stException"] button {
+  display: none !important;
+}

@@ -50,16 +50,22 @@ async def health() -> dict:
         return json.loads(text_payload)
 
 
-async def retrieve_clauses(query: str, top_k: int = 5, doc_type: str | None = None, file_name: str | None = None) -> dict:
-    """
-    Calls the MCP tool retrieve_clauses and returns parsed JSON.
-    """
+async def retrieve_clauses(
+    query: str,
+    top_k: int = 5,
+    doc_type: str | None = None,
+    file_name: str | None = None,
+    score_threshold: float | None = None,
+) -> dict:
+    """Calls the MCP tool retrieve_clauses and returns parsed JSON."""
     async with mcp_session() as session:
         args = {"query": query, "top_k": top_k}
         if doc_type:
             args["doc_type"] = doc_type
         if file_name:
             args["file_name"] = file_name
+        if score_threshold is not None and score_threshold > 0:
+            args["score_threshold"] = score_threshold
 
         result = await session.call_tool("retrieve_clauses", args)
 
@@ -69,7 +75,14 @@ async def retrieve_clauses(query: str, top_k: int = 5, doc_type: str | None = No
             return {"results": []}
 
         import json
-        return json.loads(text_payload)
+        parsed = json.loads(text_payload)
+
+        if isinstance(parsed, dict) and parsed.get("status") == "error":
+            raise RuntimeError(
+                f"MCP server error from retrieve_clauses: {parsed.get('error', 'unknown error')}"
+            )
+
+        return parsed
 
 
 async def ingest_folder(
@@ -231,7 +244,7 @@ async def create_handoff_ticket(
     retrieved_matches: list[dict] | None = None,
     notes: str | None = None,
 ) -> dict:
-    """Creates a lightweight handoff ticket on the server (in-memory)."""
+    """Creates an in-memory handoff ticket on the server."""
     async with mcp_session() as session:
         args: dict = {
             "question": question,

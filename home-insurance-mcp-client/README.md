@@ -7,7 +7,7 @@ This is the client app. It runs a Streamlit UI and a LangGraph workflow that cal
 - Streamlit UI for evidence-backed Q&A and controls.
 - LangGraph pipeline:
   `plan -> retrieve -> precedence_check -> validate -> answer -> citation_verify`
-- Audit trail with redacted previews and a one-click JSON download.
+- Audit trail with redacted previews and a downloadable JSON trace.
 - Manual ingest/index controls and a readiness indicator.
 - Job-based ingest/index with progress bars (polls job status).
 - Re-index gating: if the index already exists, re-indexing is disabled unless you confirm docs changed.
@@ -17,11 +17,11 @@ This is the client app. It runs a Streamlit UI and a LangGraph workflow that cal
 
 ## Flow (client side, in order)
 
-1. Sidebar -> Self-check (quick) to confirm `health`, `index_status`, and (if ready) a small `retrieve_clauses` call.
+1. Sidebar -> Self-check to confirm `health`, `index_status`, and (if ready) a small `retrieve_clauses` call.
 2. Sidebar -> Refresh Index Status to see whether indexing is needed.
 3. If the collection is missing or empty, run Index to Qdrant.
 4. If the collection already exists, indexing is skipped unless you check "I added/updated documents - re-index".
-5. Click Ask Concierge. The workflow runs:
+5. Click Review Coverage. The workflow runs:
    `plan -> retrieve -> precedence_check -> validate -> answer -> citation_verify`
 6. The UI shows the answer, sources, and audit trace, or blocks the run if evidence is weak or citations are invalid.
 
@@ -79,7 +79,7 @@ cd /c/AI-Agent-Buildathon-2026
 bash ./run_ui.sh
 ```
 
-For a one-command launcher that starts the MCP server and then the UI:
+For a single-command launcher that starts the MCP server and then the UI:
 
 ```bash
 cd /c/AI-Agent-Buildathon-2026
@@ -108,14 +108,14 @@ Good looks like this:
 - `client_smoke.py` shows `openai_ok: true` and a non-zero `points_count`
 - `graph_smoke.py` exits `0`
 
-## Quick walkthrough
+## Walkthrough
 
-1. Sidebar -> Self-check (quick) -> Run self-check.
+1. Sidebar -> Self-check -> Run self-check.
 2. Sidebar -> Refresh Index Status.
 3. If not indexed yet: run Index to Qdrant.
 4. If indexed already: only re-index after changing docs (check "I added/updated documents - re-index").
 5. Optional: Ingest Folder (verifies docs are found and shows progress).
-6. Pick a Quick question preset and ask.
+6. Pick a question preset and run it.
 7. Open Audit log and download the JSON trace.
 8. Optional: Create a handoff ticket and download it.
 

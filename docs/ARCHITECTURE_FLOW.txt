@@ -1,13 +1,13 @@
 HOME INSURANCE MCP - ARCHITECTURE AND EXECUTION FLOW
 
 Purpose
-This project is a local, policy-grounded Q&A workflow for homeowners insurance.
+This project is a local, document-grounded Q&A workflow for homeowners insurance.
 It combines Streamlit (UI), LangGraph (flow control), MCP (tool protocol),
 Qdrant (vector search), and OpenAI (embeddings + answer generation).
 
 Line numbers are based on the current repo state. If files change, line numbers may shift.
 
-Quick map (read these to understand the app)
+Overview
 1) UI and user flow:
    - home-insurance-mcp-client/src/client/app.py:18
 2) LangGraph pipeline and retry logic:

@@ -17,7 +17,7 @@ This project is a local, evidence-backed Q&A workflow for homeowners insurance. 
 - Qdrant stores embeddings for retrieval. `home-insurance-mcp/src/server/mcp_server.py:268`
 
 **From user click to UI response (end-to-end flow)**
-1. User clicks **Ask Concierge**; UI runs the graph. `home-insurance-mcp-client/src/client/app.py:308`
+1. User clicks **Review Coverage**; UI runs the graph. `home-insurance-mcp-client/src/client/app.py:308`
 2. `retrieve_node` calls MCP `retrieve_clauses` and builds the SOURCES block. `home-insurance-mcp-client/src/client/graph.py:95` and `home-insurance-mcp-client/src/client/mcp_client.py:53`
 3. `validate_node` blocks early if evidence is missing or weak. `home-insurance-mcp-client/src/client/graph.py:585`
 4. `answer_node` calls OpenAI and generates the draft answer. `home-insurance-mcp-client/src/client/graph.py:171`
