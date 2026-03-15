@@ -1,6 +1,6 @@
-# Home Insurance Coverage Review (MCP + Qdrant + Streamlit)
+# Home Insurance Coverage Concierge (MCP + Qdrant + Streamlit)
 
-This project is a local-first homeowners insurance Q&A workflow. Point it at a folder of policy documents (policy booklet, declarations, endorsements, notices), index them into Qdrant, and answer questions using only retrieved snippets from that packet.
+Coverage Concierge is a local-first homeowners insurance Q&A assistant. You point it at a folder of policy documents (policy booklet, declarations, endorsements, notices). It indexes them into Qdrant and answers questions using only retrieved snippets from that packet.
 
 It runs as three parts:
 - Qdrant (Docker): persistent vector index for retrieval
@@ -12,9 +12,9 @@ It runs as three parts:
 - Evidence-backed Q&A with citations tied to retrieved policy snippets.
 - Explicit ingest and index steps so you control when docs are processed.
 - Fail-closed mode: when citations are required, answers are blocked unless sources are present and citations verify.
-- Planned multi-stage retrieval: the workflow breaks the question into retrieval topics, runs multiple retrieval calls, then dedupes and merges evidence.
+- Planned multi-retrieve (not just one search): the workflow breaks the question into retrieval topics, runs multiple retrieval calls, then dedupes/merges evidence.
 - Endorsement precedence signals: retrieved endorsements are surfaced as potential overrides and flagged for verification.
-- Audit trail: retrieval plan, evidence summary, precedence signals, and a downloadable JSON trace.
+- Audit trail: retrieval plan, evidence summary, precedence signals, and a one-click JSON download.
 - Redacted snippet previews by default (with an explicit local-only toggle to view unredacted).
 - Handoff tickets: generate a structured "send to a human reviewer" payload with citations.
 - Optional utilities in the UI: quote/rating normalization, and an "impact snapshot" JSON export.
@@ -25,12 +25,12 @@ It runs as three parts:
 1. Start Qdrant (vector DB). It stores embeddings so retrieval is fast and persistent across restarts.
 2. Start the MCP server. It exposes tools like `health`, `ingest_folder`, `index_folder_qdrant`, `retrieve_clauses`, and `index_status`.
 3. Start the Streamlit UI. The UI calls MCP tools and runs the LangGraph workflow.
-4. (Optional) Run the sidebar "Self-check". It validates `health`, `index_status`, and a small retrieval call when the index is ready.
+4. (Optional) Run the sidebar "Self-check (quick)". It validates `health`, `index_status`, and a small retrieval call when the index is ready.
 5. Ingest Folder (UI button). The server scans PDFs/images under your docs folder, extracts text (with OCR fallback for scanned pages when enabled), and returns file summaries. No embeddings yet.
 6. Index to Qdrant (UI button). The server chunks text, generates embeddings, and upserts them to Qdrant in batches. The index status becomes ready.
-7. Review Coverage (UI button). The workflow runs:
+7. Ask Concierge (UI button). The workflow runs:
    `plan -> retrieve -> precedence_check -> validate -> answer -> citation_verify`
-   If evidence is weak or citations are invalid, the run is blocked. Otherwise the UI shows the answer, sources, and an audit trace download.
+   The plan node runs a scope gate first (see below). If evidence is weak or citations are invalid, the run is blocked. Otherwise the UI shows the answer, sources, and an audit trace download.
 
 Indexing note: if a Qdrant collection already exists, the UI skips re-indexing unless you confirm docs changed (checkbox: "I added/updated documents - re-index").
 
@@ -39,9 +39,19 @@ Docs folder note (important):
 - The "Docs folder" you enter in the UI must be under that server docs root.
 - If you want to use a different folder, set `MCP_DOCS_ROOT` on the server to match.
 
+## Scope gate
+
+The `plan` node runs a keyword-based scope check before any retrieval or LLM call:
+
+- **No insurance terms at all**: blocked immediately.
+- **Purely another line of business** (e.g., "what is my collision deductible?" with no homeowners context): blocked. The user is told to load the relevant policy documents.
+- **Mixed-LOB question** (e.g., "a hailstorm damaged my car in the garage and my roof — what's covered?"): passes through. The model answers only the portion the loaded homeowners documents support and explicitly defers the other portion (e.g., auto coverage) to the relevant policy type. General LLM knowledge is not used to fill the gap.
+
+The gate is controlled by the `STRICT_LINE_OF_BUSINESS_GATE` env var (default: `1`). Mixed-LOB questions pass through regardless of this flag.
+
 ## UI guardrails (exact behavior)
 
-- "Review Coverage" is disabled until all conditions are true:
+- "Ask Concierge" is disabled until all conditions are true:
   - Index is ready (Qdrant collection exists and has points; index status is OK)
   - OpenAI is configured and looks healthy (from `index_status`)
   - You check: "I confirm I'm using redacted/non-sensitive data."
@@ -65,12 +75,12 @@ Bottom line: use redacted documents for demos and avoid pasting PII.
 ## Workflow internals (LangGraph)
 
 High-level sequence:
-1. `plan`: create a retrieval plan (topics + doc types) from the question.
-2. `retrieve` (multi-retrieve): execute multiple retrieval calls, then merge/dedupe results.
+1. `plan`: run the scope gate, then create a retrieval plan of up to 5 targeted sub-queries (coverage grant, definitions, exclusions, endorsements, conditions).
+2. `retrieve` (multi-retrieve): execute each sub-query as a separate `retrieve_clauses` call, then merge and de-dupe results by stable key.
 3. `precedence_check`: scan retrieved matches for endorsement/override signals and emit a structured summary for operator review.
 4. `validate`: compute evidence strength metrics (count, unique files/doc types, top score). If it is too weak (and citations are required), the run is blocked.
-5. `answer`: draft a response from retrieved evidence.
-6. `citation_verify`: verify citation formatting/required sections; if citations are required and verification fails, the run is blocked.
+5. `answer`: draft a response from retrieved evidence using `gpt-4.1-mini`.
+6. `citation_verify`: verify citation formatting/required sections; if citations are required and verification fails, it retries once then blocks if still failing.
 
 What you will see in the UI:
 - Evidence strength (Weak/Medium/Strong) derived from validation stats
@@ -99,7 +109,7 @@ Ports (defaults):
 - MCP server: `4200`
 - Streamlit UI: `8501`
 
-## Getting Started (Windows)
+## Quick start (Windows)
 
 ### 0) Start Qdrant (persistent)
 
