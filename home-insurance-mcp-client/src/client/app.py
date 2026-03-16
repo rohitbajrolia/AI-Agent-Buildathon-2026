@@ -1,6 +1,7 @@
 import streamlit as st
 import asyncio
 import json
+import base64
 from pathlib import Path
 import re
 import hashlib
@@ -29,23 +30,45 @@ def _apply_ui_theme() -> None:
         return
 
 
+def _img_b64(filename: str) -> str:
+    """Read an image from the assets/ folder and return a base64 data URI for inline HTML embedding."""
+    try:
+        path = Path(__file__).with_name("assets") / filename
+        if not path.exists():
+            return ""
+        data = path.read_bytes()
+        mime = "image/png" if path.suffix.lower() == ".png" else f"image/{path.suffix.lstrip('.').lower()}"
+        return f"data:{mime};base64,{base64.b64encode(data).decode()}"
+    except Exception:
+        return ""
+
+
 _apply_ui_theme()
 
 # ---------- PERSISTENT HEADER + FOOTER ----------
+_sym_src = _img_b64("header_symbol.png")
+_oai_src = _img_b64("orchestrateai_logo.png")
+
+_sym_html = f'<img class="hdr-symbol" src="{_sym_src}" alt="">' if _sym_src else ""
+_oai_html = f'<img class="hdr-oai" src="{_oai_src}" alt="OrchestrateAI">' if _oai_src else ""
+
 st.markdown(
-    """
+    f"""
     <div class="app-header">
-      <div class="app-header-icon">CC</div>
-      <span class="app-header-title">Coverage Concierge</span>
-      <div class="app-header-sep"></div>
-      <span class="app-header-tagline">
-        Homeowners policy Q&amp;A &mdash; answers grounded in indexed documents only.
-        Not legal advice or a binding coverage decision. All real coverage and claims decisions require a qualified human reviewer.
-      </span>
-      <span class="app-header-pill">Homeowners &middot; Policy AI</span>
+      <div class="app-header-left">
+        {_sym_html}
+        {_oai_html}
+      </div>
+      <div class="app-header-center">
+        <span class="hdr-title">Coverage Concierge</span>
+        <span class="hdr-tagline">Homeowners policy Q&amp;A &mdash; grounded in indexed documents only &middot; Not legal advice or a binding coverage decision</span>
+      </div>
+      <div class="app-header-right">
+        <span class="app-header-pill">Homeowners &middot; Policy AI</span>
+      </div>
     </div>
     <div class="app-footer">
-      <span class="footer-brand">Coverage Concierge</span>
+      <span class="footer-brand">&copy; 2025 OrchestrateAI Agentic Research Center. All rights reserved.</span>
       <span class="footer-disclaimer">Educational use only &mdash; not legal advice or a binding coverage decision</span>
       <span class="footer-author">Developed by Rohit Bajrolia</span>
     </div>

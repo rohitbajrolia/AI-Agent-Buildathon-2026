@@ -196,57 +196,77 @@ div[data-testid="stException"] button {
   top: 0;
   left: 0;
   right: 0;
-  height: 54px;
-  background: var(--panel);
+  height: 62px;
+  background: #0d0d10;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: stretch;
+  z-index: 1001;
+  overflow: hidden;
+}
+
+/* LEFT zone — symbol + OrchestrateAI logo */
+.app-header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-right: 20px;
+  flex-shrink: 0;
+}
+
+/* Full-height symbol image — covers entire header height */
+.hdr-symbol {
+  height: 62px;
+  width: auto;
+  display: block;
+  flex-shrink: 0;
+}
+
+/* OrchestrateAI wordmark — vertically centred with equal padding */
+.hdr-oai {
+  height: 26px;
+  width: auto;
+  max-width: 200px;
+  object-fit: contain;
+  object-position: left center;
+  display: block;
+  flex-shrink: 0;
+}
+
+/* CENTER zone — app name + tagline stacked */
+.app-header-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.hdr-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.15px;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.hdr-tagline {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  line-height: 1;
+  letter-spacing: 0.05px;
+}
+
+/* RIGHT zone — pill badge */
+.app-header-right {
   display: flex;
   align-items: center;
   padding: 0 20px;
-  z-index: 1001;
-  gap: 12px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
-
-.app-header-icon {
-  width: 32px;
-  height: 32px;
-  background: var(--accent);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 800;
-  color: #000;
-  letter-spacing: -0.3px;
   flex-shrink: 0;
-}
-
-.app-header-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text);
-  letter-spacing: 0.1px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.app-header-sep {
-  width: 1px;
-  height: 22px;
-  background: var(--border);
-  flex-shrink: 0;
-}
-
-.app-header-tagline {
-  font-size: 11px;
-  color: var(--muted);
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  line-height: 1.3;
 }
 
 .app-header-pill {
@@ -256,9 +276,8 @@ div[data-testid="stException"] button {
   background: rgba(53, 184, 255, 0.1);
   border: 1px solid rgba(53, 184, 255, 0.22);
   border-radius: 20px;
-  padding: 3px 11px;
+  padding: 4px 12px;
   white-space: nowrap;
-  flex-shrink: 0;
 }
 
 /* ── Custom application footer ─────────────────────────────────────────── */
@@ -305,12 +324,12 @@ div[data-testid="stException"] button {
 
 /* Push main content below our header */
 .main .block-container {
-  padding-top: 76px !important;
+  padding-top: 82px !important;
   padding-bottom: 58px !important;
 }
 
 /* Push sidebar content below our header */
 section[data-testid="stSidebar"] > div:first-child {
-  margin-top: 54px;
+  margin-top: 62px;
   padding-bottom: 48px;
 }
