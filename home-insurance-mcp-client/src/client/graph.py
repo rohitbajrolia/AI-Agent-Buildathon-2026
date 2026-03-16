@@ -40,6 +40,7 @@ class GraphState(TypedDict):
     pending_retrieval_queries: NotRequired[list[dict[str, str]]]
     relevance_rating: NotRequired[str | None]
     domain_plausible: NotRequired[bool]
+    conversation_history: NotRequired[list[dict[str, str]]]
 
 
 _ENDORSEMENT_MODIFY_PATTERNS: list[re.Pattern] = [
@@ -998,12 +999,25 @@ def answer_node(state: GraphState) -> GraphState:
         )
         return state
 
+    history: list[dict[str, str]] = state.get("conversation_history") or []
+    history_block = ""
+    if history:
+        lines = ["\n\nPrior conversation context (for follow-up reference only — do NOT use as policy evidence):"]
+        for i, h in enumerate(history[-3:], 1):
+            q_text = str(h.get("question") or "").strip()
+            a_text = str(h.get("answer") or "").strip()
+            if q_text:
+                lines.append(f"Q{i}: {q_text}")
+            if a_text:
+                lines.append(f"A{i}: {a_text}")
+        history_block = "\n".join(lines) + "\n"
+
     prompt = USER_TEMPLATE.format(
         question=question,
         state_code=state_code,
         sources=sources,
         require_citations=require_citations,
-    )
+    ) + history_block
 
     raw_results = state.get("raw_results", []) or []
     endorsement_signals = state.get("endorsement_signals")

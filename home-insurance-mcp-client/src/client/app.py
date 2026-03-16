@@ -32,17 +32,16 @@ def _apply_ui_theme() -> None:
 _apply_ui_theme()
 
 # ---------- ALWAYS-VISIBLE COMPLIANCE HEADER ----------
-st.title("Coverage Concierge (Policy-Grounded)")
-st.warning(
-    "Educational use only - not legal advice, underwriting, or a binding coverage decision. "
-    "Coverage depends on your full policy, endorsements, declarations, and claim facts."
+st.title("Coverage Concierge")
+st.caption(
+    "Educational use only — not legal advice or a binding coverage decision. "
+    "All real coverage and claims decisions require a qualified human reviewer."
 )
 
-with st.expander("Privacy: what not to paste (PII)", expanded=False):
+with st.expander("Privacy notice", expanded=False):
     st.markdown(
-        "- Do **not** paste: SSN, bank/credit card numbers, full address, DOB, policy number, claim number.\n"
-        "- If your documents contain PII, keep them local (as you are doing). Only the cited snippets are shown.\n"
-        "- Use redacted documents whenever possible."
+        "Do **not** paste: SSN, bank/credit card numbers, full address, DOB, policy number, or claim number. "
+        "Only cited document snippets are shown in the UI. Use redacted documents whenever possible."
     )
 
 
@@ -71,6 +70,8 @@ if "wants_reindex" not in st.session_state:
     st.session_state["wants_reindex"] = False
 if "wants_reindex_input" not in st.session_state:
     st.session_state["wants_reindex_input"] = bool(st.session_state["wants_reindex"])
+if "conversation_history" not in st.session_state:
+    st.session_state["conversation_history"] = []
 
 
 def _append_feedback(record: dict) -> None:
@@ -699,8 +700,7 @@ def _render_first_time_readiness(*, status_payload: dict | None, consent_checked
     if "kb_use_current_confirmed" not in st.session_state:
         st.session_state["kb_use_current_confirmed"] = False
 
-    with st.expander("First-time setup: Ready to run checklist", expanded=True):
-        st.caption("Complete the checklist below. Use provider-specific details only in 'Show status details'.")
+    with st.expander("Setup checklist", expanded=True):
 
         kb_update_choice = st.radio(
             "How would you like to start?",
@@ -769,32 +769,17 @@ def _render_first_time_readiness(*, status_payload: dict | None, consent_checked
                 st.caption("No pending setup items.")
 
         if flow["update_mode"] and not flow["local_docs_available"]:
-            st.warning(
-                "No supported policy documents were found in the selected docs folder yet. "
-                "Add PDF, PNG, or JPG files there before scanning and building the indexed policy documents."
-            )
-        elif flow["update_mode"] and flow["kb_action_required"]:
-            st.info(
-                "Document upload selected. In the left sidebar, open 'Local policy documents + chunking settings', "
-                f"confirm the folder path, then run '{_SCAN_BUTTON_LABEL}' and '{_BUILD_BUTTON_LABEL}'."
-            )
+            st.warning("No supported documents found. Add PDFs or images to the docs folder.")
         elif flow["kb_action_skipped"] and not flow["update_mode"]:
-            st.success("The current indexed policy documents are up to date. Document scanning is optional.")
+            st.success("Indexed documents are up to date.")
         elif flow["kb_ready"] and flow["decision_confirmed"] and not flow["update_mode"]:
-            st.success("The indexed policy documents are ready. Continue to your question.")
-        else:
-            st.info("Complete the pending readiness items above.")
-
-        if flow["current_step"] != "ask":
-            st.caption("Next required action")
-            st.info(flow["current_step_hint"])
-            st.caption(f"Expected result: {flow['expected_result']}")
+            st.success("Documents ready.")
 
         pending_count = int(flow["pending_required"])
         if pending_count:
-            st.info(f"Pending required checks: {pending_count}")
+            st.caption(f"{pending_count} pending item(s). Complete them to enable the query.")
         else:
-            st.success("All required checks are complete. You can run your question now.")
+            st.success("All checks complete — ready to run.")
 
 
 def _clear_last_run() -> None:
@@ -829,6 +814,12 @@ def _apply_preset_question() -> None:
 
 
 with st.sidebar:
+    # ── Product scope and decision boundary ──────────────────────────────────
+    st.markdown("#### Coverage Concierge")
+    st.caption("Homeowners policy Q&A — answers grounded in indexed documents only. Does not make coverage or claims decisions.")
+    st.divider()
+    # ─────────────────────────────────────────────────────────────────────────
+
     last_health = st.session_state.get("last_health")
     index_status_payload = st.session_state.get("index_status")
     last_ingest = st.session_state.get("last_ingest")
@@ -853,7 +844,6 @@ with st.sidebar:
     docs_files_required = bool(preview_flow.get("current_step") == "add_documents")
 
     with st.expander("Setup checklist", expanded=True):
-        st.caption("Use this checklist to verify required setup items.")
 
         server_ok = bool(last_health and last_health.get("status") == "ok")
         qdrant_ok = bool(index_status_payload and index_status_payload.get("status") == "ok")
@@ -929,15 +919,36 @@ with st.sidebar:
         else:
             st.warning("Not ready yet")
 
-    with st.expander("Local policy documents + chunking settings", expanded=docs_step_active):
-        st.caption("Use this section to choose local policy documents and how the app chunks them for retrieval.")
+    # ── Active policy context ─────────────────────────────────────────────────
+    with st.expander("Active policy context", expanded=True):
+        _ctx_points = (index_status_payload or {}).get("points_count")
+        _ctx_collection = (index_status_payload or {}).get("collection") or "home_insurance_docs"
+        _ctx_files = (last_ingest or {}).get("files_total") or (last_index or {}).get("files_processed")
+        _ctx_chunks = (last_index or {}).get("chunks_indexed") or _ctx_points
+
+        if index_ready:
+            st.success("Documents indexed — ready for retrieval")
+            _ctx_lines = [
+                f"**Line of business:** Homeowners",
+                f"**Folder:** `{docs_dir_sidebar}`",
+            ]
+            if _ctx_files:
+                _ctx_lines.append(f"**Documents loaded:** {_ctx_files}")
+            if _ctx_chunks:
+                _ctx_lines.append(f"**Indexed chunks:** {_ctx_chunks}")
+            _ctx_lines.append(f"**Collection:** `{_ctx_collection}`")
+            st.markdown("\n\n".join(_ctx_lines))
+        else:
+            st.warning("No documents indexed — complete setup to enable queries.")
+    # ─────────────────────────────────────────────────────────────────────────
+
+    with st.expander("Policy documents + chunking", expanded=docs_step_active):
         docs_dir = st.text_input(
             "Docs folder (absolute path)",
             value=docs_dir_sidebar,
             key="docs_dir",
             help="Use a local folder containing policy PDFs or images.",
         )
-        st.caption("Add files here or place them directly in the selected folder.")
         uploaded_policy_documents = st.file_uploader(
             "Upload policy documents",
             type=["pdf", "png", "jpg", "jpeg"],
@@ -1030,7 +1041,7 @@ with st.sidebar:
         show_status = st.checkbox("Show status details", value=False)
 
     if not kb_use_current_confirmed and not update_mode:
-        st.info("Start here: in 'First-time setup', choose how you want to start, then click 'Confirm current policy documents' if you are using the existing indexed policy documents.")
+        st.caption("In the setup checklist above, confirm your start option to continue.")
 
     if refresh_status:
         try:
@@ -1170,10 +1181,6 @@ with st.sidebar:
 
     if flow["current_step"] == "ask":
         st.success("Setup complete.")
-    else:
-        st.caption("Recommended next step")
-        st.info(flow["current_step_hint"])
-        st.caption(f"Expected result: {flow['expected_result']}")
 
     can_run_health = bool(flow["decision_confirmed"] and flow["status_known"] and flow["current_step"] not in {"confirm_choice", "refresh_status"})
     can_ingest = bool(flow["current_step"] == "ingest_index")
@@ -1209,6 +1216,7 @@ with st.sidebar:
         _HEALTH_BUTTON_LABEL,
         disabled=not can_run_health,
         type="primary" if flow["current_step"] == "server_health" else "secondary",
+        help="Verify the MCP server and Qdrant are reachable before running a query.",
     ):
         try:
             payload = _run(mcp_client.health())
@@ -1223,8 +1231,6 @@ with st.sidebar:
             st.json(last_health_payload)
 
     with st.expander("Self-check", expanded=False):
-        st.caption("Use this to run a quick diagnostic for service health, index state, and retrieval.")
-        st.caption("Runs in order: health -> index status -> retrieve sample")
 
         if "self_check_query" not in st.session_state:
             st.session_state["self_check_query"] = "water damage coverage"
@@ -1449,6 +1455,19 @@ with st.sidebar:
         except Exception as e:
             st.error(f"Index failed: {_format_error_for_ui(e)}")
 
+# ---------- CONVERSATION HISTORY ----------
+_prior_turns = list(st.session_state.get("conversation_history") or [])
+if _prior_turns:
+    with st.expander(f"Conversation history ({len(_prior_turns)} prior turn{'s' if len(_prior_turns) != 1 else ''})", expanded=False):
+        for _i, _turn in enumerate(_prior_turns, 1):
+            st.markdown(f"**Q{_i}:** {_turn.get('question', '')}")
+            st.markdown(f"**A{_i}:** {_turn.get('answer', '')}")
+            if _i < len(_prior_turns):
+                st.divider()
+        if st.button("Clear conversation history", key="clear_history"):
+            st.session_state["conversation_history"] = []
+            st.rerun()
+
 # ---------- INPUTS ----------
 left, right = st.columns([2, 1])
 
@@ -1486,7 +1505,6 @@ with left:
     )
 
 with right:
-    st.caption("Controls (compliance + transparency)")
     setup_current_step = str(st.session_state.get("setup_current_step") or "")
 
     if "state" not in st.session_state:
@@ -1507,11 +1525,14 @@ with right:
         key="require_citations",
         on_change=_clear_last_run,
     )
-    st.caption("Citations verify source grounding; scope checks still block non-homeowners topics.")
-    if setup_current_step == "consent":
-        st.warning("Next step: check the confirmation box below to continue.")
+    if not require_citations:
+        st.warning(
+            "Citations are disabled. In this mode the model may draw on general knowledge "
+            "in addition to indexed policy documents. Enable citations to enforce strict "
+            "document-grounded answers."
+        )
     elif setup_current_step == "ask":
-        st.success("Setup is complete. You can run your question.")
+        st.success("Ready.")
     st.session_state["consent_confirmed_input"] = bool(st.session_state.get("consent_confirmed", False))
     consent = st.checkbox(
         "I confirm I'm using redacted/non-sensitive data.",
@@ -1520,9 +1541,7 @@ with right:
     )
     st.session_state["consent_confirmed"] = bool(consent)
 
-    st.caption("Impact & metrics: capture expected operational outcomes and export a snapshot.")
     with st.expander("Impact & metrics", expanded=False):
-        st.caption("Use measured values where available and identify estimates clearly.")
 
         if "impact_metrics" not in st.session_state:
             st.session_state["impact_metrics"] = {
@@ -1603,9 +1622,7 @@ with right:
             mime="application/json",
         )
 
-    st.caption("Quote / rating summary: normalize quote notes into structured fields.")
     with st.expander("Quote / rating summary", expanded=False):
-        st.caption("Paste a quote or rating summary. This normalizes it into key fields.")
         quote_text = st.text_area("Quote / rating text", key="quote_text", height=120)
         if st.button("Normalize quote / rating summary"):
             try:
@@ -1632,9 +1649,14 @@ if not demo_ready:
 
 ask = st.button("Review Coverage", type="primary", disabled=not (consent and demo_ready))
 
-def _run_graph_once(*, question: str, state: str, require_citations: bool) -> dict:
+def _run_graph_once(*, question: str, state: str, require_citations: bool, conversation_history: list | None = None) -> dict:
     graph = build_graph()
-    graph_input: GraphState = {"question": question, "state": state, "require_citations": require_citations}
+    graph_input: GraphState = {
+        "question": question,
+        "state": state,
+        "require_citations": require_citations,
+        "conversation_history": list(conversation_history or []),
+    }
     return graph.invoke(graph_input)
 
 
@@ -1717,7 +1739,7 @@ def _render_run(*, out: dict, question: str, state: str, require_citations: bool
         _render_next_steps(status_payload=status_payload)
         return
 
-    st.subheader("Answer (with sources)")
+    st.markdown("### Answer")
     st.write(_strip_relevance_line(answer))
 
     _render_semantic_grounding_panel(validation=validation if isinstance(validation, dict) else None, expanded=False)
@@ -1725,55 +1747,51 @@ def _render_run(*, out: dict, question: str, state: str, require_citations: bool
     endorsement_signals = out.get("endorsement_signals")
     if isinstance(endorsement_signals, dict) and endorsement_signals.get("present"):
         with st.expander("Endorsement override check", expanded=False):
-            st.caption("When endorsements are retrieved, treat them as potential overrides and verify the exact wording.")
             st.json(endorsement_signals)
 
-    st.subheader("Sources used (snippets)")
-    show_unredacted = st.checkbox("Show unredacted snippets (local only)", value=False)
-    if raw_results:
-        rows = []
-        for r in raw_results:
-            rows.append(
-                {
-                    "file": r.get("file_name"),
-                    "type": r.get("doc_type"),
-                    "page": r.get("page_number"),
-                    "chunk": r.get("chunk_index"),
-                    "score": (round(float(r["score"]), 3) if isinstance(r.get("score"), (int, float)) else None),
-                }
-            )
+    with st.expander("Sources used", expanded=False):
+        show_unredacted = st.checkbox("Show unredacted snippets (local only)", value=False)
+        if raw_results:
+            rows = []
+            for r in raw_results:
+                rows.append(
+                    {
+                        "file": r.get("file_name"),
+                        "type": r.get("doc_type"),
+                        "page": r.get("page_number"),
+                        "chunk": r.get("chunk_index"),
+                        "score": (round(float(r["score"]), 3) if isinstance(r.get("score"), (int, float)) else None),
+                    }
+                )
 
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+            st.dataframe(rows, use_container_width=True, hide_index=True)
 
-        with st.expander("View snippets", expanded=False):
-            for i, r in enumerate(raw_results, start=1):
-                file_name = r.get("file_name") or "(unknown file)"
-                doc_type = r.get("doc_type") or "(unknown type)"
-                page = r.get("page_number")
-                chunk = r.get("chunk_index")
-                header = f"{i}. {file_name} | {doc_type}"
-                if page is not None:
-                    header += f" | p. {page}"
-                if chunk is not None:
-                    header += f" | chunk {chunk}"
-                st.markdown(f"**{header}**")
-                st.caption("Snippet")
-                snippet = (r.get("snippet") or "").strip()
-                st.write(snippet if show_unredacted else _redact_display_text(snippet) or "(empty)")
-                st.divider()
-    else:
-        st.code(sources)
+            with st.expander("View snippets", expanded=False):
+                for i, r in enumerate(raw_results, start=1):
+                    file_name = r.get("file_name") or "(unknown file)"
+                    doc_type = r.get("doc_type") or "(unknown type)"
+                    page = r.get("page_number")
+                    chunk = r.get("chunk_index")
+                    header = f"{i}. {file_name} | {doc_type}"
+                    if page is not None:
+                        header += f" | p. {page}"
+                    if chunk is not None:
+                        header += f" | chunk {chunk}"
+                    st.markdown(f"**{header}**")
+                    snippet = (r.get("snippet") or "").strip()
+                    st.write(snippet if show_unredacted else _redact_display_text(snippet) or "(empty)")
+                    st.divider()
+        else:
+            st.code(sources)
 
-    st.subheader("Handoff for human review")
-    st.caption("Share a structured summary with citations for a human reviewer.")
-
-    col_h1, col_h2, col_h3 = st.columns([1, 1, 1])
-    with col_h1:
-        create_ticket = st.button("Create handoff ticket (MCP)")
-    with col_h2:
-        show_ticket = st.checkbox("Show last ticket", value=True)
-    with col_h3:
-        list_tickets = st.button("List tickets")
+    with st.expander("Handoff for human review", expanded=False):
+        col_h1, col_h2, col_h3 = st.columns([1, 1, 1])
+        with col_h1:
+            create_ticket = st.button("Create handoff ticket (MCP)")
+        with col_h2:
+            show_ticket = st.checkbox("Show last ticket", value=True)
+        with col_h3:
+            list_tickets = st.button("List tickets")
 
     sanitized_matches = _sanitize_retrieved_matches_for_audit(raw_results)
 
@@ -1819,10 +1837,7 @@ def _render_run(*, out: dict, question: str, state: str, require_citations: bool
         with st.expander("Recent tickets", expanded=False):
             st.json(st.session_state.get("handoff_tickets"))
 
-    with st.expander("Audit log", expanded=True):
-        st.caption(
-            "This log is for audit and troubleshooting. It does not store full inputs, and it redacts common PII patterns in text previews."
-        )
+    with st.expander("Audit log", expanded=False):
 
         sanitized_matches = _sanitize_retrieved_matches_for_audit(raw_results)
 
@@ -1893,8 +1908,16 @@ if run_requested:
             question=question,
             state=state,
             require_citations=bool(require_citations),
+            conversation_history=list(st.session_state.get("conversation_history") or []),
         )
     st.session_state["last_run_seconds"] = time.time() - run_started
+
+    # Append to conversation history after a successful (non-blocked) run.
+    _result_out = st.session_state.get("last_out") or {}
+    if not _result_out.get("blocked") and _result_out.get("answer"):
+        _hist = list(st.session_state.get("conversation_history") or [])
+        _hist.append({"question": question, "answer": _strip_relevance_line(_result_out["answer"])})
+        st.session_state["conversation_history"] = _hist[-5:]  # keep last 5 turns
 
 last_out = st.session_state.get("last_out")
 last_inputs = st.session_state.get("last_inputs")

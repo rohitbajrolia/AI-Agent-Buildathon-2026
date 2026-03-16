@@ -4,8 +4,8 @@
   --panel-2: #1b1c22;
   --text: #f3f4f6;
   --muted: #b6bcc7;
-  --accent: #3568ff;
-  --accent-2: #2b54d6;
+  --accent: #35B8FF;
+  --accent-2: #1a9fd8;
   --ok: #2dd4bf;
   --warn: #fbbf24;
   --err: #fb7185;
@@ -36,7 +36,7 @@ h1, h2, h3 {
 }
 
 a {
-  color: rgba(53, 104, 255, 0.95);
+  color: #35B8FF;
   text-decoration: none;
 }
 
@@ -66,19 +66,31 @@ div[data-baseweb="textarea"] textarea {
 }
 
 .stButton > button:hover {
-  border-color: rgba(53, 104, 255, 0.45);
-  background: rgba(53, 104, 255, 0.12);
+  border-color: rgba(53, 184, 255, 0.45);
+  background: rgba(53, 184, 255, 0.12);
 }
 
 /* Primary button */
 button[kind="primary"] {
   background: var(--accent) !important;
-  border: 1px solid rgba(53, 104, 255, 0.9) !important;
-  color: white !important;
+  border: 1px solid rgba(53, 184, 255, 0.9) !important;
+  color: #000000 !important;
+  font-weight: 600 !important;
 }
 
 button[kind="primary"]:hover {
   background: var(--accent-2) !important;
+}
+
+/* Pulse animation on primary button to draw attention to next required action */
+@keyframes btn-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(53, 184, 255, 0.55); }
+  70%  { box-shadow: 0 0 0 7px rgba(53, 184, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(53, 184, 255, 0); }
+}
+
+button[kind="primary"] {
+  animation: btn-pulse 2s ease-in-out infinite;
 }
 
 /* Expanders */
@@ -95,7 +107,7 @@ details > summary {
 }
 
 details > summary:hover {
-  color: rgba(53, 104, 255, 0.95);
+  color: #35B8FF;
 }
 
 /* Code blocks */
