@@ -1,0 +1,473 @@
+Coverage Concierge - Technical Flow (Developer Guide)
+=====================================================
+
+For anyone who does not like peace and want to explore this application, read this file start-to-finish once. After that, you should be able to:
+- run the system end-to-end
+- understand how indexing + retrieval + answering work
+- find the exact file that implements each feature
+- extend the MCP tools or the LangGraph workflow safely
+
+
+0) What this app is (and what it is not) - No lie
+----------------------------------------
+
+What it is:
+- A local-first homeowners insurance Q&A app that answers using only your policy packet (PDFs/images) indexed into Qdrant.
+- It is designed to be audit-friendly: it shows sources, keeps a trace, and can fail closed (block answers) when it cannot defend citations.
+- Mixed-LOB aware: questions that touch both homeowners and another line of business (e.g., a storm that damaged a car in the garage) are not blocked outright. The model answers only what the homeowners documents support and defers the rest.
+
+What it is not, but you still can go with it if you love Tufani stuffs:
+- Not legal advice, underwriting, or a binding coverage decision. The UI shows this disclaimer at the top.
+- Not a general insurance chatbot. The prompt rules and validation gates push it toward: "no evidence, no output".
+
+
+1) Repo layout (what lives where - that without rent)
+---------------------------------
+
+Top-level:
+- docker-compose.yml
+  Starts Qdrant with a persistent Docker volume.
+
+- run_demo.sh / run_server.sh / run_ui.sh / stop_demo.sh
+  Helper scripts for starting and stopping the demo locally (Windows + Git Bash).
+
+Server package:
+- home-insurance-mcp/
+  - src/server/main.py
+    Entry point that calls server.mcp_server.main().
+  - src/server/mcp_server.py
+    The MCP tool server. Owns ingest/index/retrieve + readiness checks.
+
+Client package:
+- home-insurance-mcp-client/
+  - src/client/app.py
+    Streamlit UI (buttons, guardrails, panels, downloads).
+  - src/client/graph.py
+    LangGraph state machine (plan -> retrieve -> precedence_check -> validate -> answer -> citation_verify).
+  - src/client/mcp_client.py
+    Async MCP client wrapper (Streamable HTTP calls to the server tools).
+  - src/client/prompts.py
+    System prompt + output format rules (including citation formatting rules).
+  - src/client/ui_theme.css
+    Optional UI styling loaded by app.py if present.
+
+Local-only state (git-ignored), Unless you are really interested in someone's personal....:
+- docs/
+  Default docs root for policy PDFs. The server enforces that ingest/index folder paths stay under this root.
+
+- .demo_state/
+  Small local files written by the UI/server:
+  - docs_fingerprint.json (client): used to detect "docs changed" and gate re-indexing
+  - feedback.jsonl (client): optional "Helpful / Needs work" clicks from the UI
+  - handoff_tickets.jsonl (server): best-effort persistence for created handoff tickets
+
+
+2) Tech stack (what we use, and why --> almost got bald while choosing and fixing)
+------------------------------------
+
+Runtime / framework:
+- Python 3.12+
+- Streamlit (client UI)
+  Used for fast UI: sidebar controls, progress panels, audit log, and downloads.
+
+- LangGraph (client workflow)
+  Used to make the agent behavior explicit and inspectable as a state machine with gates.
+
+Tool protocol:
+- MCP (Model Context Protocol) over Streamable HTTP
+  The client calls server tools as typed "tool calls" (health, index_status, ingest/index/retrieve, etc.).
+
+Vector store:
+- Qdrant (Docker)
+  Stores embeddings for the indexed policy packet. Retrieval uses semantic search.
+
+LLM provider:
+- OpenAI Python SDK
+  - server: embeddings (text-embedding-3-small) for indexing and query embedding
+  - client: chat completions (gpt-4.1-mini) for drafting an answer from retrieved SOURCES
+
+Document parsing / OCR:
+- pypdf (server): PDF text extraction
+- PyMuPDF/fitz + Pillow + pytesseract (server): OCR fallback for scanned PDFs and images
+  OCR fallback is gated by env (ENABLE_PDF_OCR_FALLBACK) and runtime availability.
+
+Config:
+- python-dotenv
+  Both apps load .env files locally with override enabled.
+
+
+3) How you run it (start here)
+------------------------------
+
+Step A - Start Qdrant
+- docker compose up -d
+
+Step B - Start MCP server + Streamlit UI
+- easiest: bash ./run_demo.sh
+  This script:
+  - checks Qdrant health first
+  - checks MCP health via an MCP tool call (not a plain GET)
+  - starts the MCP server if needed
+  - starts Streamlit UI
+
+Manual start (if you love pain):
+- server: run home-insurance-mcp/src/server/main.py (it starts Uvicorn/Starlette)
+- client: run Streamlit on home-insurance-mcp-client/src/client/app.py
+
+
+4) End-to-end technical flow (from click to answer)
+---------------------------------------------------
+
+This system is intentionally split into: "tools" on the server, and "agent workflow + UI" on the client.
+
+4.1 UI startup and readiness
+
+File: home-insurance-mcp-client/src/client/app.py
+
+On load:
+- Streamlit config + optional CSS theme.
+- Shows an always-on disclaimer and a PII warning expander.
+- Reads/updates Streamlit session state for:
+  - docs directory input
+  - index status payload
+  - consent checkbox
+  - require citations toggle
+  - last run outputs (answer, sources, trace, etc.)
+
+Readiness signals:
+- The UI calls server tool index_status and uses it to decide if the demo is "ready":
+  - Qdrant reachable
+  - collection exists and has points
+  - OpenAI is configured (and optionally ping-checked)
+  - OCR readiness signals (fitz + tesseract) are shown for scanned packets
+
+
+4.2 Indexing flow (ingest -> index into Qdrant)
+
+Server tools involved:
+- ingest_folder (summary only)
+- index_folder_qdrant (chunk + embed + upsert)
+- start_ingest_job / start_index_job + job_status (same work, but with progress polling)
+
+Client UI entry points:
+- "Ingest Folder" button
+- "Index to Qdrant" button
+- Optional: "Self-check (quick)" panel runs health -> index_status -> sample retrieve
+
+File: home-insurance-mcp-client/src/client/app.py
+What the UI does:
+- Reads docs folder path from the sidebar.
+- Uses job tools so the UI can show progress:
+  - start_ingest_job / start_index_job return a job_id
+  - UI polls job_status and updates the progress display
+- Re-index gating:
+  - If the Qdrant collection already exists, indexing is disabled unless the user explicitly confirms docs changed.
+  - The client computes a lightweight docs fingerprint from PDF path + size + mtime and stores it in .demo_state/docs_fingerprint.json.
+
+File: home-insurance-mcp/src/server/mcp_server.py
+What the server does during indexing:
+- Enforces docs root:
+  - DOCS_ROOT defaults to <workspace>/docs (override via MCP_DOCS_ROOT)
+  - ingest/index folder paths must be under DOCS_ROOT
+
+- Extracts text:
+  - PDFs: pypdf extracts page text
+  - OCR fallback for scanned pages:
+    - if extraction is empty, and OCR is enabled, it renders the page with PyMuPDF (fitz) and OCRs with pytesseract
+  - Images: OCR directly via pytesseract
+
+- Classifies doc type (heuristic):
+  - policy_booklet / declarations / endorsement / unknown
+  Used later as metadata and to filter retrieval.
+
+- Chunks text (default settings used by both ingest and index):
+  - chunk_size: 1200 chars
+  - overlap: 150 chars
+  - overlap is clamped to be strictly less than chunk_size (prevents an infinite loop if bad values are passed)
+
+- Embeds chunks:
+  - OpenAI embeddings model: text-embedding-3-small
+
+- Upserts to Qdrant:
+  - Collection name: QDRANT_COLLECTION (default: home_insurance_docs)
+  - Payload stored per chunk includes:
+    - file_name (path relative to the indexed folder)
+    - doc_type
+    - page_number (PDFs)
+    - chunk_index (stable index used in citations)
+    - text (full chunk)
+
+Point IDs are stable UUIDv5 based on a deterministic string:
+- PDFs: "<rel_path>::p<page>::c<chunk_in_page>"
+- Images: "<rel_path>::<chunk_index>"
+
+
+4.3 Question answering flow (LangGraph + MCP tools + gating)
+
+Entry point:
+- UI button "Ask Concierge" in app.py
+  This builds a GraphState and calls graph.invoke().
+
+Workflow file:
+- home-insurance-mcp-client/src/client/graph.py
+
+GraphState (the data that flows through the nodes):
+- question (required)
+- state (jurisdiction context, default "IL")
+- require_citations (default True)
+- retrieval_plan (sub-queries built by the plan node)
+- raw_results (retrieved matches with metadata)
+- sources (the SOURCES block shown in UI and passed to the LLM)
+- answer (drafted response)
+- validation + blocked (fail-closed gates)
+- endorsement_signals + precedence_check (override risk signals)
+- trace (audit events)
+
+Node 1: plan (plan_retrievals_node)
+- Scope gate runs first, before any retrieval or LLM call:
+  - No insurance-domain terms at all: blocked immediately.
+  - Purely another line of business (e.g., "what is my collision deductible?" with no homeowners context): blocked. Message tells the user to load the relevant policy documents.
+  - Mixed-LOB question (e.g., "hailstorm damaged my car in the garage and my roof — what's covered?"): passes through. The model answers only what the homeowners documents support and defers the auto/other portion explicitly.
+- If in scope: builds a retrieval plan of up to 5 targeted sub-queries:
+  - Coverage grant
+  - Definitions
+  - Exclusions / limits
+  - Endorsements / changes
+  - Conditions / duties (only for certain questions)
+- Stores a redacted version of the plan in state and logs it to trace.
+
+Node 2: retrieve (multi_retrieve_node)
+- Executes each sub-query from the retrieval plan.
+- For each plan query:
+  - Calls server tool retrieve_clauses (via mcp_client.retrieve_clauses)
+  - Collects and merges results across topics
+- De-dupes results by a stable key:
+  (file_name, doc_type, chunk_index, page_number)
+- Keeps top matches and builds the SOURCES block:
+  - Each line includes a citation tag plus a short snippet preview.
+  - Citation tags look like:
+    - [file | doc_type | chunk N]
+    - [file | doc_type | p. X | chunk N]
+
+Node 3: precedence_check (precedence_check_node)
+- Detects endorsement override risk signals:
+  - If retrieved matches include doc_type == "endorsement"
+  - And the endorsement snippet includes phrases like "changes the policy", "replaces", "supersedes", etc.
+- Stores:
+  - endorsement_signals (details + matched patterns)
+  - precedence_check (a small summary with override_risk boolean)
+- The UI renders this in the "Endorsement override check" expander.
+
+Node 4: validate (validate_node)
+- Only strict when require_citations is True.
+- Blocks early when evidence is clearly too weak:
+  - no retrieved matches
+  - extremely low top relevance score
+  - weak relevance + low diversity (all evidence from one narrow slice)
+- Writes a structured validation object:
+  - reasons, warnings, next_actions, and basic stats
+- This drives:
+  - the "Evidence strength" label in the UI
+  - the blocked state (with next steps)
+
+Node 5: answer (answer_node)
+- Uses:
+  - home-insurance-mcp-client/src/client/prompts.py (SYSTEM_PROMPT + USER_TEMPLATE)
+  - OpenAI chat completions (model: gpt-4.1-mini, max_tokens: 900)
+- The prompt includes:
+  - the user question + state code
+  - the SOURCES block
+  - citation rules and a fixed output format
+- Extra safety when citations are required:
+  - Builds an explicit allow-list of citation tags derived from retrieved matches.
+  - Instructs the model to copy citations only from that allow-list.
+
+Node 6: citation_verify (verify_citations_node)
+- Only enforced when require_citations is True.
+- It verifies two things:
+  1) citations in the answer match the retrieved match keys (file/doc_type/page/chunk)
+  2) required sections have bullets that end with citations:
+     - "Coverage answer"
+     - "Key conditions / exclusions to watch" (minor header variations allowed)
+
+Formatting normalization (before verification):
+- Collapses hard-wrapped bullets in required sections (so one bullet = one line).
+- Moves citations to the end of required bullets when the model inserts them mid-sentence.
+
+One retry:
+- If verification fails and we have not retried yet, it asks the model once more to fix formatting and use only allowed citation tags (max_tokens: 700 for retry).
+- If verification still fails, the run is blocked and the answer is suppressed.
+
+
+5) MCP tool contract (what tools exist and what they return - we all know its surprise)
+------------------------------------------------------------
+
+Server implementation:
+- home-insurance-mcp/src/server/mcp_server.py
+  The server uses a single dispatcher: _call_tool_impl(name, arguments)
+
+All tools return JSON encoded as MCP TextContent.
+On error, call_tool returns:
+  {"status": "error", "tool": "<name>", "error": "<redacted error text>"}
+
+Core tools:
+- health
+  Actively checks Qdrant connectivity via get_collections().
+  Returns status "ok" (Qdrant reachable) or "degraded" (Qdrant unreachable),
+  plus qdrant_reachable, collection_exists, docs_root, docs_root_exists.
+
+- index_status
+  Returns readiness signals:
+  - Qdrant connectivity
+  - collection existence and point count
+  - OpenAI configured + optional ping result (cached)
+  - OCR readiness (fitz + tesseract availability)
+  - docs root path
+
+- ingest_folder
+  Returns summaries per file:
+  - file_name, doc_type, text_chars, chunks_count
+  Does not embed or write to Qdrant.
+
+- index_folder_qdrant
+  Indexes supported files under the folder:
+  - PDF and common image types
+  - chunks + embeddings + upsert to Qdrant
+  - overlap is clamped to be strictly less than chunk_size
+
+- retrieve_clauses
+  Semantic search over indexed chunks:
+  Returns:
+  - score
+  - file_name, doc_type, page_number (if present), chunk_index
+  - snippet (first ~800 chars of the stored chunk text)
+
+Job tools:
+- start_ingest_job / start_index_job
+  Returns {job_id}. Server runs work in a background thread.
+
+- job_status
+  Returns the job record with fields:
+  - status/message
+  - progress (files_total/files_done, chunk estimates, batches done, etc.)
+  - result or error
+
+Handoff tools:
+- create_handoff_ticket
+  Takes question/state/answer/sources and optional redacted match summaries.
+  Stores in memory and appends best-effort to .demo_state/handoff_tickets.jsonl.
+
+- list_handoff_tickets
+  Returns recent stored tickets.
+
+Utility tool:
+- normalize_quote_snapshot
+  Lightweight normalization of pasted quote/rating text into key fields.
+
+
+6) UI outputs: what the user can see / download (if they have cloud storage backup)
+-----------------------------------------------
+
+File: home-insurance-mcp-client/src/client/app.py
+
+Main outputs:
+- Answer (with sources)
+- Sources table (file/type/page/chunk/score) + redacted snippet viewer
+- Endorsement override check (JSON summary)
+- Audit log panel:
+  - trace steps
+  - inputs + evidence summary
+  - downloadable audit trace JSON
+
+Other UI features:
+- Handoff ticket creation + download
+- Feedback logging (local-only)
+- Impact snapshot JSON download (manual inputs for demo/pilot assumptions)
+
+
+7) Configuration (env vars and where they are read -- be cautious, ssshh its very secret)
+---------------------------------------------------
+
+Server .env:
+- home-insurance-mcp/.env
+Loaded in: home-insurance-mcp/src/server/mcp_server.py
+
+Common server env vars:
+- OPENAI_API_KEY
+- QDRANT_URL (default http://localhost:6333)
+- QDRANT_COLLECTION (default home_insurance_docs)
+- MCP_HOST (default 127.0.0.1)
+- MCP_PORT (default 4200)
+- MCP_DOCS_ROOT (default <workspace>/docs)
+- MCP_DEBUG (default 0 - set to 1 to enable Starlette debug mode and stack traces)
+- ENABLE_PDF_OCR_FALLBACK (default 1)
+- CHECK_OPENAI_ON_INDEX_STATUS (default 1)
+- OPENAI_INDEX_STATUS_CACHE_SECONDS (default 60)
+- MCP_TICKETS_STORE (default .demo_state/handoff_tickets.jsonl)
+
+Client .env:
+- home-insurance-mcp-client/.env
+Loaded in:
+- home-insurance-mcp-client/src/client/mcp_client.py
+- home-insurance-mcp-client/src/client/graph.py
+
+Common client env vars:
+- MCP_SERVER_URL (default http://127.0.0.1:4200/mcp/)
+- OPENAI_API_KEY
+- STRICT_LINE_OF_BUSINESS_GATE (default 1 - set to 0 to disable the auto LOB block)
+- RETRIEVE_SCORE_THRESHOLD (default 0.55)
+
+
+8) Extension points (where to add features safely)
+--------------------------------------------------
+
+Add a new server tool:
+- home-insurance-mcp/src/server/mcp_server.py
+  - Add a new "if name == '<tool_name>':" block in _call_tool_impl
+  - Add a matching Tool schema in list_tools()
+  - Keep outputs JSON and errors redacted
+
+Add a new workflow step:
+- home-insurance-mcp-client/src/client/graph.py
+  - Add a node function
+  - Wire it in build_graph() with explicit edges
+  - Log a trace event so the UI audit panel stays useful
+
+Change answer format or citation rules:
+- home-insurance-mcp-client/src/client/prompts.py (format rules)
+- home-insurance-mcp-client/src/client/graph.py (verification logic in verify_citations_node)
+  Keep these two in sync. The whole "defensible output" behavior depends on it.
+
+Change scope gate behavior:
+- home-insurance-mcp-client/src/client/graph.py
+  - _scope_gate() controls what gets blocked vs passed through
+  - _HOMEOWNERS_ADJACENT_KEYWORDS controls what counts as a mixed-LOB question
+  - STRICT_LINE_OF_BUSINESS_GATE env var enables/disables the auto LOB block
+
+
+9) Quick "where is this implemented?" lookup
+---------------------------------------------
+
+UI + guardrails + downloads:
+- home-insurance-mcp-client/src/client/app.py
+
+Workflow + gating + scope gate:
+- home-insurance-mcp-client/src/client/graph.py
+
+Prompt + output structure:
+- home-insurance-mcp-client/src/client/prompts.py
+
+Tool client (Streamable HTTP):
+- home-insurance-mcp-client/src/client/mcp_client.py
+
+Tool server + Qdrant + OCR:
+- home-insurance-mcp/src/server/mcp_server.py
+
+Server entry point:
+- home-insurance-mcp/src/server/main.py
+
+Qdrant container:
+- docker-compose.yml
+
+One-command demo runner:
+- run_demo.sh

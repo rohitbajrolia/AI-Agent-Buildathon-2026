@@ -1,0 +1,147 @@
+HOME INSURANCE MCP - ARCHITECTURE AND EXECUTION FLOW
+
+Purpose
+This project is a local, policy-grounded Q&A workflow for homeowners insurance.
+It combines Streamlit (UI), LangGraph (flow control), MCP (tool protocol),
+Qdrant (vector search), and OpenAI (embeddings + answer generation).
+
+Quick map (read these to understand the app)
+1) UI and user flow:
+   - home-insurance-mcp-client/src/client/app.py
+2) LangGraph pipeline and retry logic:
+   - home-insurance-mcp-client/src/client/graph.py
+3) Prompt rules and answer format:
+   - home-insurance-mcp-client/src/client/prompts.py
+4) MCP client wrapper (tool calls):
+   - home-insurance-mcp-client/src/client/mcp_client.py
+5) MCP server tools (ingest, index, retrieve, status):
+   - home-insurance-mcp/src/server/mcp_server.py
+6) One-command start script:
+   - run_demo.sh
+
+What each technology does in this repo
+1) Streamlit: renders the UI and calls LangGraph when the user clicks Ask.
+   - home-insurance-mcp-client/src/client/app.py
+2) LangGraph: orchestrates the steps plan -> retrieve -> precedence_check -> validate -> answer -> citation_verify.
+   - home-insurance-mcp-client/src/client/graph.py  (see build_graph)
+3) MCP: a tool protocol; the client calls tools on the server over streamable HTTP.
+   - home-insurance-mcp-client/src/client/mcp_client.py
+   - home-insurance-mcp/src/server/mcp_server.py
+4) Qdrant: stores embeddings and returns nearest chunks for retrieval.
+   - home-insurance-mcp/src/server/mcp_server.py
+5) OpenAI: embeddings (indexing/retrieval) and chat completions (answer + rewrite).
+   - home-insurance-mcp/src/server/mcp_server.py
+   - home-insurance-mcp-client/src/client/graph.py  (see answer_node)
+
+Execution flow (from run_demo.sh to final UI)
+Step 1: Preflight (run_demo.sh)
+- Check Qdrant health and fail fast if missing.
+- Check MCP server health using MCP tool call (not a plain GET).
+- Start MCP server if not already running.
+- Start Streamlit UI.
+
+Step 2: UI guardrails and preflight
+- PII warning and consent gate.
+- Readiness check (Qdrant + index + OpenAI).
+- Ask button is disabled until ready and consent is checked.
+
+Step 3: LangGraph pipeline starts
+- Graph invoked with question + state code + require_citations flag.
+- Pipeline nodes are wired in build_graph() in graph.py.
+
+Step 4: Plan node (scope gate + retrieval planning)
+- plan_retrievals_node() runs first.
+- Scope gate (keyword-based, runs before any network call):
+  - No insurance-domain terms: blocked immediately.
+  - Purely another line of business (e.g., auto-only question with no homeowners context): blocked with a clear message to load the correct policy documents.
+  - Mixed-LOB question (e.g., "hailstorm damaged my car in the garage"): passes through. The model answers only the homeowners-supported portion and explicitly defers the rest to the relevant policy type.
+- If in scope: builds a retrieval plan of up to 5 targeted sub-queries (coverage grant, definitions, exclusions, endorsements, conditions).
+
+Step 5: Retrieve node (multi-retrieve, MCP -> Qdrant)
+- multi_retrieve_node() executes each sub-query from the plan.
+- For each sub-query: calls MCP retrieve_clauses tool.
+  - MCP client performs the tool call (mcp_client.py - retrieve_clauses).
+  - MCP server embeds the query and queries Qdrant (mcp_server.py).
+- Results from all sub-queries are merged and de-duped by stable key (file_name, doc_type, chunk_index, page_number).
+- Builds the SOURCES block passed to the LLM.
+
+Step 6: Precedence check node
+- precedence_check_node() scans retrieved matches for endorsement override signals.
+- Stores a structured precedence summary (override_risk boolean + matched patterns).
+- UI renders this in the "Endorsement override check" expander.
+
+Step 7: Validate node (evidence gate)
+- validate_node() computes evidence strength metrics (result count, unique files/doc types, top score).
+- Only strict when require_citations is True.
+- Blocks if evidence is clearly too weak:
+  - No retrieved matches
+  - Very low top relevance score
+  - Weak relevance combined with low diversity
+- If blocked, UI shows reasons and next actions.
+
+Step 8: Answer node (OpenAI chat)
+- answer_node() drafts a response from retrieved evidence.
+- Prompt is built using system rules (prompts.py) + SOURCES block.
+- Allowed citation tags are injected to prevent invented citations.
+- OpenAI chat completion is called (model: gpt-4.1-mini, max_tokens: 900).
+
+Step 9: Citation verification and retry
+- verify_citations_node() parses citations and checks them against retrieved chunk keys.
+- Only enforced when require_citations is True.
+- If citations are invalid, the model is asked to rewrite once (max_tokens: 700 for retry).
+- If still invalid, the answer is cleared and the run is blocked.
+
+Step 10: Final UI output
+- Answer display (if not blocked).
+- Sources table and redacted snippets.
+- Audit trail and downloadable trace JSON.
+
+MCP server tools (what they do)
+All tools are dispatched through _call_tool_impl() in mcp_server.py.
+All tools return JSON encoded as MCP TextContent.
+On error, call_tool returns: {"status": "error", "tool": "<name>", "error": "<redacted error text>"}
+
+1) health: checks Qdrant connectivity via get_collections().
+   Returns status "ok" or "degraded" plus qdrant_reachable, collection_exists, and docs_root.
+
+2) ingest_folder: read docs and return summaries (no embeddings).
+   Returns file_name, doc_type, text_chars, chunks_count per file.
+
+3) index_folder_qdrant: read docs, chunk, embed, and upsert to Qdrant.
+   chunk_size and overlap are clamped (overlap must be strictly less than chunk_size).
+
+4) retrieve_clauses: embed the query and query Qdrant.
+   Returns score, file_name, doc_type, page_number (if present), chunk_index, snippet.
+
+5) index_status: report Qdrant + OpenAI readiness and OCR availability.
+   Returns qdrant reachable, collection existence and point count, OpenAI status, fitz/tesseract availability.
+
+6) normalize_quote_snapshot: parse key numbers from quote text.
+
+Job tools:
+7) start_ingest_job / start_index_job: returns {job_id}. Server runs work in a background thread.
+8) job_status: returns the job record with status, progress, result, or error.
+
+Handoff tools:
+9) create_handoff_ticket: takes question/state/answer/sources, stores in memory and on disk.
+10) list_handoff_tickets: returns recent stored tickets.
+
+Guardrails (where they are implemented)
+1) Privacy warning and consent in UI (app.py).
+2) Redacted audit trail and snippet display (app.py, graph.py).
+3) Strict prompt rules for citations and no PII (prompts.py).
+4) Scope gate in plan node: blocks wrong-LOB questions before retrieval (graph.py - plan_retrievals_node).
+5) Evidence gate before answering (graph.py - validate_node).
+6) Citation verification with retry and block (graph.py - verify_citations_node).
+7) Docs root restriction on ingest/index (mcp_server.py).
+
+Smoke tests and debug helpers
+- MCP smoke test (health + index + retrieve):
+  home-insurance-mcp-client/scripts/client_smoke.py
+- LangGraph smoke test (retrieve -> validate -> answer -> verify):
+  home-insurance-mcp-client/scripts/graph_smoke.py
+
+Suggested reading order (if new to MCP/LangGraph)
+1) home-insurance-mcp-client/src/client/app.py
+2) home-insurance-mcp-client/src/client/graph.py  (start at build_graph)
+3) home-insurance-mcp/src/server/mcp_server.py  (start at _call_tool_impl)

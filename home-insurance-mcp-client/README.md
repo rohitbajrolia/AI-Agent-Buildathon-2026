@@ -1,41 +1,60 @@
 # Home Insurance MCP (Client)
 
-This repo is the demo client. It runs a Streamlit UI and a LangGraph workflow that retrieves evidence from the MCP server and produces a cited answer.
+This is the client app. It runs a Streamlit UI and a LangGraph workflow that calls the MCP server for evidence, then produces a cited answer (or blocks if the evidence/citations are not defensible).
 
 ## What it provides
 
-- Streamlit UI for policy-grounded Q&A and demo controls.
-- LangGraph pipeline: retrieve -> validate -> answer -> citation_verify.
+- Streamlit UI for evidence-backed Q&A and controls.
+- LangGraph pipeline:
+  `plan -> retrieve -> precedence_check -> validate -> answer -> citation_verify`
+  The plan node runs a scope gate before retrieval. The retrieve node runs multiple targeted sub-queries per plan topic, then merges and de-dupes results.
 - Audit trail with redacted previews and a one-click JSON download.
 - Manual ingest/index controls and a readiness indicator.
+- Job-based ingest/index with progress bars (polls job status).
+- Re-index gating: if the index already exists, re-indexing is disabled unless you confirm docs changed.
+- Endorsement override check: shows precedence risk signals when endorsements are retrieved.
+- Handoff tickets: generate a structured "send to a human reviewer" JSON payload with citations.
+- Optional utilities: quote/rating normalization and an "impact snapshot" JSON export.
 
 ## Flow (client side, in order)
 
-1. Use Server Health and Refresh Index Status to confirm the backend is ready.
-2. Run Ingest Folder and Index to Qdrant when docs are new or changed.
-3. Click Ask Concierge. LangGraph runs retrieve -> validate -> answer -> citation_verify.
-4. The UI shows the answer, sources, and audit trace, or blocks the run if evidence is weak or citations are invalid.
+1. Sidebar -> Self-check (quick) to confirm `health`, `index_status`, and (if ready) a small `retrieve_clauses` call.
+2. Sidebar -> Refresh Index Status to see whether indexing is needed.
+3. If the collection is missing or empty, run Index to Qdrant.
+4. If the collection already exists, indexing is skipped unless you check "I added/updated documents - re-index".
+5. Click Ask Concierge. The workflow runs:
+   `plan -> retrieve -> precedence_check -> validate -> answer -> citation_verify`
+6. The UI shows the answer, sources, and audit trace, or blocks the run if evidence is weak or citations are invalid.
 
 ## Guardrails
 
-- Privacy: the UI warns against PII and defaults to redacted snippets in the audit trace.
+- Privacy: the UI warns against PII and defaults to redacted snippets in the audit views.
+- Readiness: Q&A is disabled until the index is ready and OpenAI looks healthy (from `index_status`).
 - Consent: Q&A is disabled until the user confirms they are using redacted data.
-- Grounding: answers require citations, and the system blocks responses when evidence is weak or missing.
-- Verification: citations are checked against retrieved chunks; invalid citations are rejected.
+- Scope gate: purely out-of-scope or wrong-LOB questions are blocked before any retrieval. Mixed-LOB questions pass through; the model answers only what the loaded documents support and defers the rest.
+- Grounding: answers are instructed to use only the provided SOURCES.
+- Verification: when "Require citations" is on, citations are checked against retrieved chunks; invalid citations trigger one retry, then the run is blocked.
+- The UI shows an always-on disclaimer: educational use only; not legal advice, underwriting, or a binding coverage decision.
 
 ## Prereqs
 
 - Python 3.12+
 - The MCP server running (`home-insurance-mcp`)
 - Qdrant running
-- OpenAI API key (for the answer step in the client)
+- OpenAI API key (used by the client answer step)
 
 ## Configure
 
 Copy the example env file:
 
-```bash
+PowerShell:
+```powershell
 copy .env.example .env
+```
+
+Git Bash:
+```bash
+cp .env.example .env
 ```
 
 Set values in `.env`: `MCP_SERVER_URL` and `OPENAI_API_KEY`.
@@ -76,7 +95,7 @@ cd /c/AI-Agent-Buildathon-2026
 bash ./stop_demo.sh
 ```
 
-## Demo preflight
+## Preflight checks
 
 Run:
 
@@ -86,25 +105,39 @@ python scripts/client_smoke.py
 python scripts/graph_smoke.py
 ```
 
-Good looks like this: `demo_preflight.py` prints `PASS (demo-ready)`, `client_smoke.py` shows `openai_ok: true` and a non-zero `points_count`, and `graph_smoke.py` exits `0`.
+Good looks like this:
+- `demo_preflight.py` prints `PASS (ready)`
+- `client_smoke.py` shows `openai_ok: true` and a non-zero `points_count`
+- `graph_smoke.py` exits `0`
 
-## The 90-second demo script
+## Quick walkthrough
 
-1. Sidebar -> Server Health (confirms the server is reachable).
-2. Sidebar -> Refresh Index Status. If it says Not indexed yet, run Index to Qdrant.
-3. Sidebar -> Ingest Folder (confirms docs are found).
-4. Sidebar -> Index to Qdrant.
-5. Pick a Quick question preset and ask.
-6. Open Audit trail and download the JSON trace.
+1. Sidebar -> Self-check (quick) -> Run self-check.
+2. Sidebar -> Refresh Index Status.
+3. If not indexed yet: run Index to Qdrant.
+4. If indexed already: only re-index after changing docs (check "I added/updated documents - re-index").
+5. Optional: Ingest Folder (verifies docs are found and shows progress).
+6. Pick a Quick question preset and ask.
+7. Open Audit log and download the JSON trace.
+8. Optional: Create a handoff ticket and download it.
 
 ## Troubleshooting
 
 - Qdrant unreachable: start Qdrant, then refresh index status.
 - Not indexed yet or empty: run Index to Qdrant from the sidebar.
+- Docs updated but answers look stale: check "I added/updated documents - re-index" and run Index to Qdrant.
 - Blocked due to weak evidence: re-index the correct folder or ask a more specific question.
 
 ## Notes
 
 - If you need access from another device, run Streamlit with `--server.address 0.0.0.0` and start the MCP server with `MCP_HOST=0.0.0.0`. Then set `MCP_SERVER_URL` to your machine's LAN IP (for example, `http://192.168.1.10:4200/mcp/`).
-- Keep documents local and preferably redacted. The audit trace stores short, redacted previews of user text.
-- The demo is designed around citations. If you turn off Require citations, you are choosing a less strict mode.
+- Keep documents local and preferably redacted. The audit trace stores short, redacted previews of text.
+- The system is designed around citations. If you turn off "Require citations", you are choosing a less strict mode.
+
+## Local state files
+
+The UI writes small local-only files under `.demo_state/`:
+- `docs_fingerprint.json`: remembers the last indexed docs snapshot (used to detect likely doc changes)
+- `feedback.jsonl`: optional feedback clicks saved locally from the UI
+
+Note: the MCP server also persists handoff tickets under `.demo_state/` by default.

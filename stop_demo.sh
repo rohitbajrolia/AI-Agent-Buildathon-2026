@@ -27,7 +27,7 @@ kill_port() {
   done <<<"$pids"
 }
 
-echo "Stopping demo processes..."
+echo "Stopping processes..."
 kill_port "$STREAMLIT_PORT" "Streamlit UI"
 kill_port "$MCP_PORT" "MCP server"
 
