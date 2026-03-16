@@ -31,11 +31,26 @@ def _apply_ui_theme() -> None:
 
 _apply_ui_theme()
 
-# ---------- ALWAYS-VISIBLE COMPLIANCE HEADER ----------
-st.title("Coverage Concierge")
-st.caption(
-    "Educational use only — not legal advice or a binding coverage decision. "
-    "All real coverage and claims decisions require a qualified human reviewer."
+# ---------- PERSISTENT HEADER + FOOTER ----------
+st.markdown(
+    """
+    <div class="app-header">
+      <div class="app-header-icon">CC</div>
+      <span class="app-header-title">Coverage Concierge</span>
+      <div class="app-header-sep"></div>
+      <span class="app-header-tagline">
+        Homeowners policy Q&amp;A &mdash; answers grounded in indexed documents only.
+        Not legal advice or a binding coverage decision. All real coverage and claims decisions require a qualified human reviewer.
+      </span>
+      <span class="app-header-pill">Homeowners &middot; Policy AI</span>
+    </div>
+    <div class="app-footer">
+      <span class="footer-brand">Coverage Concierge</span>
+      <span class="footer-disclaimer">Educational use only &mdash; not legal advice or a binding coverage decision</span>
+      <span class="footer-author">Developed by Rohit Bajrolia</span>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
 with st.expander("Privacy notice", expanded=False):
@@ -814,11 +829,6 @@ def _apply_preset_question() -> None:
 
 
 with st.sidebar:
-    # ── Product scope and decision boundary ──────────────────────────────────
-    st.markdown("#### Coverage Concierge")
-    st.caption("Homeowners policy Q&A — answers grounded in indexed documents only. Does not make coverage or claims decisions.")
-    st.divider()
-    # ─────────────────────────────────────────────────────────────────────────
 
     last_health = st.session_state.get("last_health")
     index_status_payload = st.session_state.get("index_status")
