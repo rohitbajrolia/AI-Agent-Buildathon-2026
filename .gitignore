@@ -3,10 +3,8 @@
 # Local documents / policy packets (keep out of git)
 docs/**
 
-# Allow-list repo-safe docs
+# Allow-list the docs/ directory entry itself (not its contents)
 !docs/
-!docs/ARCHITECTURE_FLOW.txt
-!docs/TECHNICAL_FLOW.txt
 
 # Python virtual environments
 .venv/
