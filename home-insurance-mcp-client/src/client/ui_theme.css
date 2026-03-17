@@ -4,8 +4,8 @@
   --panel-2: #1b1c22;
   --text: #f3f4f6;
   --muted: #b6bcc7;
-  --accent: #3568ff;
-  --accent-2: #2b54d6;
+  --accent: #35B8FF;
+  --accent-2: #1a9fd8;
   --ok: #2dd4bf;
   --warn: #fbbf24;
   --err: #fb7185;
@@ -36,7 +36,7 @@ h1, h2, h3 {
 }
 
 a {
-  color: rgba(53, 104, 255, 0.95);
+  color: #35B8FF;
   text-decoration: none;
 }
 
@@ -66,19 +66,31 @@ div[data-baseweb="textarea"] textarea {
 }
 
 .stButton > button:hover {
-  border-color: rgba(53, 104, 255, 0.45);
-  background: rgba(53, 104, 255, 0.12);
+  border-color: rgba(53, 184, 255, 0.45);
+  background: rgba(53, 184, 255, 0.12);
 }
 
 /* Primary button */
 button[kind="primary"] {
   background: var(--accent) !important;
-  border: 1px solid rgba(53, 104, 255, 0.9) !important;
-  color: white !important;
+  border: 1px solid rgba(53, 184, 255, 0.9) !important;
+  color: #000000 !important;
+  font-weight: 600 !important;
 }
 
 button[kind="primary"]:hover {
   background: var(--accent-2) !important;
+}
+
+/* Pulse animation on primary button to draw attention to next required action */
+@keyframes btn-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(53, 184, 255, 0.55); }
+  70%  { box-shadow: 0 0 0 7px rgba(53, 184, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(53, 184, 255, 0); }
+}
+
+button[kind="primary"] {
+  animation: btn-pulse 2s ease-in-out infinite;
 }
 
 /* Expanders */
@@ -95,7 +107,7 @@ details > summary {
 }
 
 details > summary:hover {
-  color: rgba(53, 104, 255, 0.95);
+  color: #35B8FF;
 }
 
 /* Code blocks */
@@ -166,9 +178,9 @@ div[data-testid="stAlert"] p {
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
 
+/* Replace Streamlit's native header with our own fixed bar */
 header[data-testid="stHeader"] {
-  background: rgba(14, 14, 16, 0.85);
-  border-bottom: 1px solid var(--border);
+  display: none !important;
 }
 
 /* Hide Streamlit's built-in exception helper actions in the product UI */
@@ -176,3 +188,161 @@ div[data-testid="stException"] a,
 div[data-testid="stException"] button {
   display: none !important;
 }
+
+/* ── Custom application header ─────────────────────────────────────────── */
+
+.app-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 62px;
+  background: #0d0d10;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: stretch;
+  z-index: 1100;   /* above sidebar (100) and Streamlit chrome */
+  overflow: hidden;
+  pointer-events: auto; /* header elements are fully interactive */
+}
+
+/* LEFT zone — symbol + OrchestrateAI logo */
+.app-header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-right: 20px;
+  flex-shrink: 0;
+}
+
+/* Full-height symbol image — covers entire header height */
+.hdr-symbol {
+  height: 62px;
+  width: auto;
+  display: block;
+  flex-shrink: 0;
+}
+
+/* OrchestrateAI wordmark — vertically centred with equal padding */
+.hdr-oai {
+  height: 26px;
+  width: auto;
+  max-width: 200px;
+  object-fit: contain;
+  object-position: left center;
+  display: block;
+  flex-shrink: 0;
+}
+
+/* CENTER zone — app name + tagline stacked */
+.app-header-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.hdr-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.15px;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.hdr-tagline {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  line-height: 1;
+  letter-spacing: 0.05px;
+}
+
+/* RIGHT zone — pill badge */
+.app-header-right {
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  flex-shrink: 0;
+}
+
+.app-header-pill {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--accent);
+  background: rgba(53, 184, 255, 0.1);
+  border: 1px solid rgba(53, 184, 255, 0.22);
+  border-radius: 20px;
+  padding: 4px 12px;
+  white-space: nowrap;
+}
+
+/* ── Custom application footer ─────────────────────────────────────────── */
+
+.app-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 38px;
+  background: #0b0b0d;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  z-index: 1001;
+  font-size: 10.5px;
+  color: rgba(182, 188, 199, 0.55);
+}
+
+.footer-brand {
+  color: rgba(182, 188, 199, 0.8);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.footer-disclaimer {
+  flex: 1;
+  text-align: center;
+  padding: 0 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footer-author {
+  color: rgba(182, 188, 199, 0.75);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* ── Content offset to clear fixed header + footer ─────────────────────── */
+
+/* Push main content below our header */
+.main .block-container {
+  padding-top: 82px !important;
+  padding-bottom: 58px !important;
+}
+
+/* Sidebar: z-order below header; responsive width via viewport units */
+section[data-testid="stSidebar"] {
+  z-index: 100 !important;
+  min-width: 22vw !important;
+  width: 22vw !important;
+}
+
+/* Sidebar header row: push down to clear our fixed 62px app header */
+[data-testid="stSidebarHeader"] {
+  padding-top: 68px !important;
+}
+
+/* Hide collapse button — sidebar is always visible; resize by dragging */
+[data-testid="stSidebarCollapseButton"] {
+  display: none !important;
+}
+
