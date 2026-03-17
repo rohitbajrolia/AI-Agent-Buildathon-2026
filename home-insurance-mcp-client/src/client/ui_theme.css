@@ -201,8 +201,9 @@ div[data-testid="stException"] button {
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: stretch;
-  z-index: 1001;
+  z-index: 1100;   /* above sidebar (100) and Streamlit chrome */
   overflow: hidden;
+  pointer-events: auto; /* header elements are fully interactive */
 }
 
 /* LEFT zone — symbol + OrchestrateAI logo */
@@ -328,9 +329,10 @@ div[data-testid="stException"] button {
   padding-bottom: 58px !important;
 }
 
-/* Sidebar sits below our fixed header in z-order */
+/* Sidebar sits below our fixed header in z-order; min-width prevents squished state */
 section[data-testid="stSidebar"] {
   z-index: 100 !important;
+  min-width: 300px !important;
 }
 
 /* Sidebar header row (contains logo + collapse button):
@@ -347,16 +349,3 @@ section[data-testid="stSidebar"] {
   display: none !important;
 }
 
-/* Ensure our app header always renders above sidebar overlay */
-.app-header {
-  z-index: 1100 !important;
-}
-
-/* Pointer-events on header: allow clicks on underlying sidebar expand strip
-   to pass through the header's transparent edges */
-.app-header {
-  pointer-events: none;
-}
-.app-header > * {
-  pointer-events: auto;
-}
