@@ -339,10 +339,12 @@ section[data-testid="stSidebar"] {
   padding-top: 68px !important;
 }
 
-/* Collapse (<<) button stays inside sidebar — no repositioning needed,
-   the padding-top on stSidebarHeader already places it correctly */
+/* Hide sidebar collapse button.
+   Streamlit 1.54 has no reliable expand button when collapsed and our
+   fixed header blocks the thin expand strip. Sidebar must stay visible —
+   it holds all setup controls. Users resize the sidebar by dragging. */
 [data-testid="stSidebarCollapseButton"] {
-  margin-top: 0;
+  display: none !important;
 }
 
 /* Ensure our app header always renders above sidebar overlay */
