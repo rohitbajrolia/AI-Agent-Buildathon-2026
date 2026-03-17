@@ -328,25 +328,26 @@ div[data-testid="stException"] button {
   padding-bottom: 58px !important;
 }
 
-/* Sidebar: start below fixed header, never overlap it */
+/* Sidebar: z-index below our header so header always wins */
 section[data-testid="stSidebar"] {
-  top: 62px !important;
-  height: calc(100vh - 62px) !important;
   z-index: 100 !important;
 }
 
-/* Remove the old margin-top hack — top offset handles it now */
+/* Push sidebar inner content below our fixed header */
 section[data-testid="stSidebar"] > div:first-child {
-  margin-top: 0 !important;
+  padding-top: 70px !important;
   padding-bottom: 48px;
 }
 
-/* Sidebar collapse/expand toggle button: keep below header so it's always clickable */
+/* Sidebar collapsed expand (>>) button: fix position below header so it is always visible and clickable */
 [data-testid="collapsedControl"] {
+  position: fixed !important;
   top: 70px !important;
+  left: 8px !important;
+  z-index: 1050 !important;
 }
 
-/* Header must always sit above everything including sidebar */
+/* Header must always sit above everything */
 .app-header {
   z-index: 1100 !important;
 }
