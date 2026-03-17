@@ -18,7 +18,11 @@ if str(_SRC_ROOT) not in sys.path:
 from client.graph import GraphState, build_graph
 from client import mcp_client
 
-st.set_page_config(page_title="Home Insurance Coverage Concierge", layout="wide")
+st.set_page_config(
+    page_title="Coverage Concierge — OrchestrateAI",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 
 def _apply_ui_theme() -> None:

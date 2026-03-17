@@ -328,26 +328,33 @@ div[data-testid="stException"] button {
   padding-bottom: 58px !important;
 }
 
-/* Sidebar: z-index below our header so header always wins */
+/* Sidebar sits below our fixed header in z-order */
 section[data-testid="stSidebar"] {
   z-index: 100 !important;
 }
 
-/* Push sidebar inner content below our fixed header */
-section[data-testid="stSidebar"] > div:first-child {
-  padding-top: 70px !important;
-  padding-bottom: 48px;
+/* Sidebar header row (contains logo + collapse button):
+   push it down so it clears our fixed app header */
+[data-testid="stSidebarHeader"] {
+  padding-top: 68px !important;
 }
 
-/* Sidebar collapsed expand (>>) button: fix position below header so it is always visible and clickable */
-[data-testid="collapsedControl"] {
-  position: fixed !important;
-  top: 70px !important;
-  left: 8px !important;
-  z-index: 1050 !important;
+/* Collapse (<<) button stays inside sidebar — no repositioning needed,
+   the padding-top on stSidebarHeader already places it correctly */
+[data-testid="stSidebarCollapseButton"] {
+  margin-top: 0;
 }
 
-/* Header must always sit above everything */
+/* Ensure our app header always renders above sidebar overlay */
 .app-header {
   z-index: 1100 !important;
+}
+
+/* Pointer-events on header: allow clicks on underlying sidebar expand strip
+   to pass through the header's transparent edges */
+.app-header {
+  pointer-events: none;
+}
+.app-header > * {
+  pointer-events: auto;
 }
