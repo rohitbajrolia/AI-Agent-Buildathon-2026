@@ -329,22 +329,19 @@ div[data-testid="stException"] button {
   padding-bottom: 58px !important;
 }
 
-/* Sidebar sits below our fixed header in z-order; min-width prevents squished state */
+/* Sidebar: z-order below header; responsive width via viewport units */
 section[data-testid="stSidebar"] {
   z-index: 100 !important;
-  min-width: 300px !important;
+  min-width: 22vw !important;
+  width: 22vw !important;
 }
 
-/* Sidebar header row (contains logo + collapse button):
-   push it down so it clears our fixed app header */
+/* Sidebar header row: push down to clear our fixed 62px app header */
 [data-testid="stSidebarHeader"] {
   padding-top: 68px !important;
 }
 
-/* Hide sidebar collapse button.
-   Streamlit 1.54 has no reliable expand button when collapsed and our
-   fixed header blocks the thin expand strip. Sidebar must stay visible —
-   it holds all setup controls. Users resize the sidebar by dragging. */
+/* Hide collapse button — sidebar is always visible; resize by dragging */
 [data-testid="stSidebarCollapseButton"] {
   display: none !important;
 }
